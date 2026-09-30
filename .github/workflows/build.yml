@@ -15,6 +15,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - name: Build Android TV app
@@ -22,7 +24,7 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon
 
   windows:
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
