@@ -30,6 +30,8 @@ GitHub Actions 的 `LANScreenCast-Windows-x64-MSIX` 产物包含 Release 安装�
 
 ```powershell
 Import-Certificate -FilePath .\LANScreenCast-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.appx
+Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.Desktop.appx
 Add-AppxPackage .\LANScreenCast-x64.msix
 ```
 
