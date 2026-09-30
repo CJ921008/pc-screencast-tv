@@ -1,0 +1,46 @@
+# LAN ScreenCast
+
+Windows → Android TV 局域网投屏项目。当前为 **Milestone 0：项目骨架**。两端只显示等待界面并记录启动日志；设备发现、配对、信令、WebRTC、屏幕采集和音频尚未实现。
+
+## 目录
+
+```text
+.
+├── windows/                 C++20 / WinUI 3 Windows 发送端
+│   ├── LANScreenCast.sln
+│   └── LANScreenCast/       单项目 MSIX 应用与文件日志
+├── android-tv/              Kotlin / Compose for TV 接收端
+│   ├── app/
+│   └── gradle/wrapper/
+├── protocol/                版本 1 的信令消息外层结构
+└── .github/workflows/       双端构建工作流
+```
+
+## Windows 构建与运行
+
+需要 Windows 10/11、Visual Studio 2022（C++ 桌面开发与 WinUI 应用开发组件）和 Windows SDK。打开 `windows/LANScreenCast.sln`，还原 NuGet 包，选择 **Debug | x64**，按 F5 构建、部署并启动。命令行构建：
+
+```powershell
+msbuild windows\LANScreenCast.sln /restore /m /p:Configuration=Debug /p:Platform=x64 /p:GenerateAppxPackageOnBuild=false /p:AppxPackageSigningEnabled=false
+```
+
+工程使用 Windows App SDK 2.4.0 和 MSBuild。首次部署可能需要启用 Windows 开发人员模式。启动后显示“等待连接电视”。日志位于应用私有 LocalFolder 下的 `logs\lanscreencast.log`，通常在 `%LOCALAPPDATA%\Packages\LANScreenCast.Sender_*\LocalState\logs\`。
+
+## Android TV 构建与运行
+
+需要 JDK 17、Android SDK Platform 37 和 Build Tools 36.0.0。Android Studio 可直接打开 `android-tv/`；命令行：
+
+```sh
+cd android-tv
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+从 Android TV 启动器打开 **LAN ScreenCast**，应显示“等待连接”。日志位于应用私有目录 `files/logs/lanscreencast.log`。调试设备可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。
+
+## CI 与协议
+
+`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows x64 和 Android Debug。当前目录尚未连接 Git 远程仓库，因此 Windows CI 需在仓库接入 GitHub 后运行。
+
+`protocol/signaling.schema.json` 只定义消息外层字段；`protocol/protocol-version.md` 固定协议版本 1。该阶段没有网络消息交换。
+

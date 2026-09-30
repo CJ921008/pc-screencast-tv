@@ -1,0 +1,18 @@
+.gradle/
+.idea/
+**/build/
+**/.cxx/
+android-tv/local.properties
+windows/.vs/
+windows/packages/
+windows/**/Debug/
+windows/**/Release/
+windows/**/x64/
+windows/**/Win32/
+windows/**/ARM64/
+windows/**/Generated Files/
+windows/**/obj/
+windows/**/bin/
+*.user
+*.suo
+

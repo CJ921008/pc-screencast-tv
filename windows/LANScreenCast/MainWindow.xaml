@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window x:Class="LANScreenCast.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16">
+            <TextBlock Text="LAN ScreenCast" FontSize="32" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            <TextBlock Text="等待连接电视" FontSize="22" HorizontalAlignment="Center" />
+            <TextBlock Text="请确保电脑和电视连接到同一个局域网" Opacity="0.7" HorizontalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</Window>
