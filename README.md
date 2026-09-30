@@ -26,6 +26,15 @@ msbuild windows\LANScreenCast.sln /restore /m /p:Configuration=Debug /p:Platform
 
 工程使用 Windows App SDK 2.4.0 和 MSBuild。首次部署可能需要启用 Windows 开发人员模式。启动后显示“等待连接电视”。日志位于应用私有 LocalFolder 下的 `logs\lanscreencast.log`，通常在 `%LOCALAPPDATA%\Packages\LANScreenCast.Sender_*\LocalState\logs\`。
 
+GitHub Actions 的 `LANScreenCast-Windows-x64-MSIX` 产物包含 Release 安装包和测试证书。解压后，在该目录打开**管理员 PowerShell**，执行：
+
+```powershell
+Import-Certificate -FilePath .\LANScreenCast-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Add-AppxPackage .\LANScreenCast-x64.msix
+```
+
+证书仅用于此测试版；安装前应核对证书来源。旧的 `LANScreenCast-Windows-x64-debug` 是开发构建，不能当安装程序运行。
+
 ## Android TV 构建与运行
 
 需要 JDK 17、Android SDK Platform 37 和 Build Tools 36.0.0。Android Studio 可直接打开 `android-tv/`；命令行：
@@ -40,6 +49,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## CI 与协议
 
-`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows x64 和 Android Debug，并上传 `LANScreenCast-Windows-x64-debug` 与 `LANScreenCast-Android-TV-debug` 两个产物。Windows 产物是构建输出目录，尚不是可直接安装的 MSIX 包。
+`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows Release MSIX 和 Android Debug APK，并上传 `LANScreenCast-Windows-x64-MSIX` 与 `LANScreenCast-Android-TV-debug` 两个产物。
 
 `protocol/signaling.schema.json` 只定义消息外层字段；`protocol/protocol-version.md` 固定协议版本 1。该阶段没有网络消息交换。
