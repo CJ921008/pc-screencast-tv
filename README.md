@@ -47,7 +47,9 @@ cd android-tv
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-从 Android TV 启动器打开 **LAN ScreenCast**，应显示“等待连接”。日志位于应用私有目录 `files/logs/lanscreencast.log`。调试设备可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。
+安装后可在手机应用列表或 Android TV 启动器中找到 **LAN 投屏接收器**（深蓝底、青色屏幕图标）。打开后显示“等待连接”。日志位于应用私有目录 `files/logs/lanscreencast.log`。调试设备可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。
+
+如果设备上曾安装不同签名的调试包，`adb install -r` 会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`；先卸载旧版，再安装新包。卸载会清除该应用的本地数据和日志。
 
 ## CI 与协议
 
