@@ -15,4 +15,4 @@ windows/**/obj/
 windows/**/bin/
 *.user
 *.suo
-
+.DS_Store

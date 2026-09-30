@@ -40,7 +40,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## CI 与协议
 
-`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows x64 和 Android Debug。当前目录尚未连接 Git 远程仓库，因此 Windows CI 需在仓库接入 GitHub 后运行。
+`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows x64 和 Android Debug，并上传 `LANScreenCast-Windows-x64-debug` 与 `LANScreenCast-Android-TV-debug` 两个产物。Windows 产物是构建输出目录，尚不是可直接安装的 MSIX 包。
 
 `protocol/signaling.schema.json` 只定义消息外层字段；`protocol/protocol-version.md` 固定协议版本 1。该阶段没有网络消息交换。
-
