@@ -182,7 +182,7 @@ namespace LANScreenCast::casting
                 Gdiplus::Bitmap scaled(width, height, PixelFormat32bppRGB);
                 {
                     Gdiplus::Graphics graphics(&scaled);
-                    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
+                    graphics.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
                     if (graphics.DrawImage(&source, 0, 0, width, height) != Gdiplus::Ok)
                         throw std::runtime_error("Desktop frame scaling failed");
                 }
@@ -237,13 +237,17 @@ namespace LANScreenCast::casting
             DWORD sendTimeout = 2000;
             setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO,
                 reinterpret_cast<char*>(&sendTimeout), sizeof(sendTimeout));
+            int sendBuffer = 256 * 1024;
+            setsockopt(socket, SOL_SOCKET, SO_SNDBUF,
+                reinterpret_cast<char*>(&sendBuffer), sizeof(sendBuffer));
             return socket;
         }
     }
 
-    void StreamDesktop(std::wstring const& receiverIp, std::atomic_bool const& stop,
+    void StreamDesktop(std::wstring const& receiverIp, int targetFps, std::atomic_bool const& stop,
         std::function<void(std::wstring const&)> const& onStatus)
     {
+        targetFps = std::clamp(targetFps, 10, 30);
         Runtime runtime;
         CLSID encoder = JpegEncoder();
         DesktopCapture capture;
@@ -253,20 +257,39 @@ namespace LANScreenCast::casting
             SendAll(socket, "LSC1", 4);
             onStatus(L"正在投屏");
             std::vector<BYTE> latestImage;
+            auto lastSent = std::chrono::steady_clock::now();
+            auto statsStart = lastSent;
+            int sentFrames = 0;
+            auto framePeriod = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(1.0 / targetFps));
             while (!stop)
             {
                 auto start = std::chrono::steady_clock::now();
                 auto image = capture.CaptureJpeg(encoder);
-                if (!image.empty()) latestImage = std::move(image);
-                if (!latestImage.empty())
+                bool changed = !image.empty();
+                if (changed) latestImage = std::move(image);
+                auto now = std::chrono::steady_clock::now();
+                if (!latestImage.empty() && (changed || now - lastSent >= std::chrono::seconds(1)))
                 {
                     if (latestImage.size() > 8 * 1024 * 1024)
                         throw std::runtime_error("Captured frame is too large");
                     uint32_t length = htonl(static_cast<uint32_t>(latestImage.size()));
                     SendAll(socket, reinterpret_cast<char const*>(&length), sizeof(length));
                     SendAll(socket, reinterpret_cast<char const*>(latestImage.data()), latestImage.size());
+                    lastSent = std::chrono::steady_clock::now();
+                    ++sentFrames;
                 }
-                std::this_thread::sleep_until(start + std::chrono::milliseconds(100));
+                now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - statsStart).count();
+                if (elapsed >= 3000)
+                {
+                    int actualFps = static_cast<int>(sentFrames * 1000LL / elapsed);
+                    onStatus(std::wstring(L"正在投屏 · 目标 ") + std::to_wstring(targetFps) +
+                        L" FPS · 实际画面更新 " + std::to_wstring(actualFps) + L" FPS");
+                    statsStart = now;
+                    sentFrames = 0;
+                }
+                std::this_thread::sleep_until(start + framePeriod);
             }
         }
         catch (...)

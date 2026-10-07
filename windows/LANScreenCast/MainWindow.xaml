@@ -8,6 +8,12 @@
             <TextBlock Text="Windows 桌面投屏" FontSize="22" />
             <TextBlock Text="在接收设备上打开 LAN 投屏接收器，输入画面显示的 IP 地址。电脑与接收设备须处于同一局域网。" TextWrapping="Wrap" />
             <TextBox x:Name="ReceiverIp" Header="接收设备 IP 地址" PlaceholderText="例如 192.168.1.25" />
+            <ComboBox x:Name="FrameRate" Header="目标帧率" SelectedIndex="2">
+                <ComboBoxItem Content="10 FPS" />
+                <ComboBoxItem Content="15 FPS" />
+                <ComboBoxItem Content="20 FPS" />
+                <ComboBoxItem Content="30 FPS" />
+            </ComboBox>
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <Button x:Name="StartButton" Content="开始投屏" Click="Start_Click" />
                 <Button x:Name="StopButton" Content="停止投屏" Click="Stop_Click" IsEnabled="False" />

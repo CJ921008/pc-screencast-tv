@@ -38,18 +38,21 @@ namespace winrt::LANScreenCast::implementation
             return;
         }
         if (m_worker.joinable()) m_worker.join();
+        constexpr int frameRates[] = { 10, 15, 20, 30 };
+        int selected = FrameRate().SelectedIndex();
+        int targetFps = frameRates[selected >= 0 && selected < 4 ? selected : 2];
         m_stop = false;
         m_running = true;
         SetStatus(L"正在连接接收设备…", true);
         ::LANScreenCast::logging::FileLogger::Write(L"INFO", L"CAST", L"CONNECTING", ip);
         auto dispatcher = DispatcherQueue();
         auto weak = get_weak();
-        m_worker = std::thread([this, ip, dispatcher, weak]()
+        m_worker = std::thread([this, ip, targetFps, dispatcher, weak]()
         {
             std::wstring finalStatus = L"投屏已停止";
             try
             {
-                ::LANScreenCast::casting::StreamDesktop(ip, m_stop,
+                ::LANScreenCast::casting::StreamDesktop(ip, targetFps, m_stop,
                     [dispatcher, weak](std::wstring const& message)
                     {
                         dispatcher.TryEnqueue([weak, text = winrt::hstring(message)]()

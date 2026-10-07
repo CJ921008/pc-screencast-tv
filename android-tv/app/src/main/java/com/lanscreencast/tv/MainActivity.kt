@@ -1,13 +1,16 @@
 package com.lanscreencast.tv
 
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,18 +20,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.lanscreencast.tv.logging.FileLogger
+import kotlin.math.min
 
 class MainActivity : ComponentActivity() {
-    private var frame by mutableStateOf<Bitmap?>(null)
+    private var casting by mutableStateOf(false)
     private var status by mutableStateOf("等待连接")
     private lateinit var receiver: ScreenReceiver
+    @Volatile private var surfaceView: SurfaceView? = null
+    private val framePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private var sampleStart = SystemClock.elapsedRealtime()
+    private var renderedFrames = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,22 +42,21 @@ class MainActivity : ComponentActivity() {
         FileLogger.log(this, "INFO", "APP", "STARTED", "Receiver waiting for connection")
         receiver = ScreenReceiver(
             this,
-            onFrame = { bitmap -> runOnUiThread { frame = bitmap; showFullscreen(true) } },
+            onFrame = ::drawFrame,
             onStatus = { value -> runOnUiThread {
                 status = value
-                if (value != "正在投屏") { frame = null; showFullscreen(false) }
+                casting = value == "正在投屏"
+                if (!casting) surfaceView = null
+                showFullscreen(casting)
             } },
         )
         receiver.start()
         setContent {
             MaterialTheme {
-                val currentFrame = frame
-                if (currentFrame != null) {
-                    Image(
-                        bitmap = currentFrame.asImageBitmap(),
-                        contentDescription = "Windows 投屏画面",
-                        modifier = Modifier.fillMaxSize().background(Color.Black),
-                        contentScale = ContentScale.Fit,
+                if (casting) {
+                    AndroidView(
+                        factory = { context -> SurfaceView(context).also { surfaceView = it } },
+                        modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     Column(
@@ -70,6 +75,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun drawFrame(bitmap: Bitmap) {
+        try {
+            val holder = surfaceView?.holder ?: return
+            if (!holder.surface.isValid) return
+            val canvas = holder.lockCanvas() ?: return
+            try {
+                canvas.drawColor(Color.BLACK)
+                val scale = min(canvas.width.toFloat() / bitmap.width, canvas.height.toFloat() / bitmap.height)
+                val width = bitmap.width * scale
+                val height = bitmap.height * scale
+                val target = RectF(
+                    (canvas.width - width) / 2f, (canvas.height - height) / 2f,
+                    (canvas.width + width) / 2f, (canvas.height + height) / 2f,
+                )
+                canvas.drawBitmap(bitmap, null, target, framePaint)
+            } finally {
+                holder.unlockCanvasAndPost(canvas)
+            }
+            renderedFrames++
+            val now = SystemClock.elapsedRealtime()
+            if (now - sampleStart >= 5000) {
+                val fps = renderedFrames * 1000 / (now - sampleStart)
+                FileLogger.log(this, "INFO", "VIDEO", "RENDER_FPS", "$fps")
+                sampleStart = now
+                renderedFrames = 0
+            }
+        } catch (error: Exception) {
+            FileLogger.log(this, "ERROR", "VIDEO", "DRAW_FAILED", error.message.orEmpty())
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     private fun showFullscreen(fullscreen: Boolean) {
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = if (fullscreen) {
@@ -80,6 +118,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         receiver.stop()
+        surfaceView = null
         super.onDestroy()
     }
 }
