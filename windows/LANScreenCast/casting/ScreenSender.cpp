@@ -9,6 +9,7 @@
 
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Gdiplus.lib")
+#pragma comment(lib, "Gdi32.lib")
 
 namespace LANScreenCast::casting
 {

@@ -31,11 +31,11 @@ GitHub Actions 的 `LANScreenCast-Windows-x64-MSIX` 产物包含 Release 安装�
 ```powershell
 Import-Certificate -FilePath .\LANScreenCast-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.appx
-Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.Desktop.appx
+Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.Desktop.appx -ForceApplicationShutdown
 Add-AppxPackage .\LANScreenCast-x64.msix
 ```
 
-证书仅用于此测试版；安装前应核对证书来源。旧的 `LANScreenCast-Windows-x64-debug` 是开发构建，不能当安装程序运行。
+每次 CI 都生成新的测试签名证书。升级先前 CI 安装的 Windows 包前，先在 PowerShell 执行 `Get-AppxPackage LANScreenCast.Sender | Remove-AppxPackage`，再导入本次产物的证书并安装。证书仅用于此测试版；安装前应核对证书来源。旧的 `LANScreenCast-Windows-x64-debug` 是开发构建，不能当安装程序运行。
 
 ## Android TV 构建与运行
 
