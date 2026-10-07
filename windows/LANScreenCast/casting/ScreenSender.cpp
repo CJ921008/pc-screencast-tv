@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "ScreenSender.h"
+#include <d3d11.h>
+#include <dxgi1_2.h>
 #include <gdiplus.h>
+#include <wrl/client.h>
 #include <algorithm>
 #include <chrono>
 #include <stdexcept>
@@ -9,19 +12,14 @@
 
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Gdiplus.lib")
-#pragma comment(lib, "Gdi32.lib")
+#pragma comment(lib, "D3d11.lib")
+#pragma comment(lib, "Dxgi.lib")
 
 namespace LANScreenCast::casting
 {
     namespace
     {
         constexpr int port = 47474;
-
-        struct BitmapHandle
-        {
-            HBITMAP value;
-            ~BitmapHandle() { if (value) DeleteObject(value); }
-        };
 
         struct Runtime
         {
@@ -54,44 +52,8 @@ namespace LANScreenCast::casting
             throw std::runtime_error("JPEG encoder unavailable");
         }
 
-        std::vector<BYTE> CaptureJpeg(CLSID const& encoder)
+        std::vector<BYTE> EncodeJpeg(Gdiplus::Bitmap& image, CLSID const& encoder)
         {
-            HDC screen = GetDC(nullptr);
-            if (!screen) throw std::runtime_error("Cannot capture desktop");
-            HDC memory = CreateCompatibleDC(screen);
-            int sourceWidth = GetSystemMetrics(SM_CXSCREEN);
-            int sourceHeight = GetSystemMetrics(SM_CYSCREEN);
-            int width = std::min(sourceWidth, 1280);
-            int height = std::max(1, sourceHeight * width / sourceWidth);
-            BITMAPINFO info{};
-            info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            info.bmiHeader.biWidth = width;
-            info.bmiHeader.biHeight = -height;
-            info.bmiHeader.biPlanes = 1;
-            info.bmiHeader.biBitCount = 32;
-            info.bmiHeader.biCompression = BI_RGB;
-            void* pixels = nullptr;
-            HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-            if (!memory || !bitmap)
-            {
-                if (bitmap) DeleteObject(bitmap);
-                if (memory) DeleteDC(memory);
-                ReleaseDC(nullptr, screen);
-                throw std::runtime_error("Cannot allocate capture bitmap");
-            }
-            BitmapHandle bitmapHandle{ bitmap };
-            HGDIOBJ old = SelectObject(memory, bitmap);
-            SetStretchBltMode(memory, HALFTONE);
-            BOOL copied = StretchBlt(memory, 0, 0, width, height, screen, 0, 0,
-                sourceWidth, sourceHeight, SRCCOPY | CAPTUREBLT);
-            SelectObject(memory, old);
-            DeleteDC(memory);
-            ReleaseDC(nullptr, screen);
-            if (!copied)
-                throw std::runtime_error("Desktop capture failed");
-
-            Gdiplus::Bitmap image(width, height, width * 4, PixelFormat32bppRGB,
-                static_cast<BYTE*>(pixels));
             IStream* stream = nullptr;
             if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)))
                 throw std::runtime_error("Cannot create JPEG stream");
@@ -131,6 +93,102 @@ namespace LANScreenCast::casting
             stream->Release();
             return result;
         }
+
+        class DesktopCapture
+        {
+            using ComPtrDevice = Microsoft::WRL::ComPtr<ID3D11Device>;
+            ComPtrDevice device;
+            Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+            Microsoft::WRL::ComPtr<IDXGIOutputDuplication> duplication;
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> staging;
+
+        public:
+            DesktopCapture()
+            {
+                Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+                if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+                    throw std::runtime_error("Desktop capture is unavailable");
+                for (UINT adapterIndex = 0; ; ++adapterIndex)
+                {
+                    Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+                    if (factory->EnumAdapters1(adapterIndex, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+                    for (UINT outputIndex = 0; ; ++outputIndex)
+                    {
+                        Microsoft::WRL::ComPtr<IDXGIOutput> output;
+                        if (adapter->EnumOutputs(outputIndex, &output) == DXGI_ERROR_NOT_FOUND) break;
+                        DXGI_OUTPUT_DESC outputDescription{};
+                        if (FAILED(output->GetDesc(&outputDescription))) continue;
+                        auto area = outputDescription.DesktopCoordinates;
+                        if (!outputDescription.AttachedToDesktop || area.left > 0 || area.top > 0 ||
+                            area.right <= 0 || area.bottom <= 0) continue;
+                        D3D_FEATURE_LEVEL level{};
+                        device.Reset();
+                        context.Reset();
+                        if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+                            D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+                            &device, &level, &context))) continue;
+                        Microsoft::WRL::ComPtr<IDXGIOutput1> output1;
+                        if (FAILED(output.As(&output1))) continue;
+                        if (SUCCEEDED(output1->DuplicateOutput(device.Get(), &duplication))) return;
+                    }
+                }
+                throw std::runtime_error("Cannot duplicate the primary display; check display permissions");
+            }
+
+            std::vector<BYTE> CaptureJpeg(CLSID const& encoder)
+            {
+                DXGI_OUTDUPL_FRAME_INFO frameInfo{};
+                Microsoft::WRL::ComPtr<IDXGIResource> resource;
+                HRESULT result = duplication->AcquireNextFrame(100, &frameInfo, &resource);
+                if (result == DXGI_ERROR_WAIT_TIMEOUT) return {};
+                if (FAILED(result)) throw std::runtime_error("Display capture stopped; restart casting");
+                struct ReleaseFrame
+                {
+                    IDXGIOutputDuplication* value;
+                    ~ReleaseFrame() { value->ReleaseFrame(); }
+                } release{ duplication.Get() };
+
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> frame;
+                if (FAILED(resource.As(&frame))) throw std::runtime_error("Cannot read desktop frame");
+                D3D11_TEXTURE2D_DESC description{};
+                frame->GetDesc(&description);
+                if (!staging)
+                {
+                    description.Usage = D3D11_USAGE_STAGING;
+                    description.BindFlags = 0;
+                    description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    description.MiscFlags = 0;
+                    if (FAILED(device->CreateTexture2D(&description, nullptr, &staging)))
+                        throw std::runtime_error("Cannot allocate desktop readback");
+                }
+                context->CopyResource(staging.Get(), frame.Get());
+                D3D11_MAPPED_SUBRESOURCE mapped{};
+                if (FAILED(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
+                    throw std::runtime_error("Cannot map desktop frame");
+                struct UnmapFrame
+                {
+                    ID3D11DeviceContext* context;
+                    ID3D11Texture2D* texture;
+                    ~UnmapFrame() { context->Unmap(texture, 0); }
+                } unmap{ context.Get(), staging.Get() };
+
+                int sourceWidth = static_cast<int>(description.Width);
+                int sourceHeight = static_cast<int>(description.Height);
+                int width = std::min(sourceWidth, 1280);
+                int height = std::max(1, sourceHeight * width / sourceWidth);
+                Gdiplus::Bitmap source(sourceWidth, sourceHeight,
+                    static_cast<INT>(mapped.RowPitch), PixelFormat32bppRGB,
+                    static_cast<BYTE*>(mapped.pData));
+                Gdiplus::Bitmap scaled(width, height, PixelFormat32bppRGB);
+                {
+                    Gdiplus::Graphics graphics(&scaled);
+                    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
+                    if (graphics.DrawImage(&source, 0, 0, width, height) != Gdiplus::Ok)
+                        throw std::runtime_error("Desktop frame scaling failed");
+                }
+                return EncodeJpeg(scaled, encoder);
+            }
+        };
 
         void SendAll(SOCKET socket, char const* bytes, size_t length)
         {
@@ -188,20 +246,26 @@ namespace LANScreenCast::casting
     {
         Runtime runtime;
         CLSID encoder = JpegEncoder();
+        DesktopCapture capture;
         SOCKET socket = Connect(receiverIp);
         try
         {
             SendAll(socket, "LSC1", 4);
             onStatus(L"正在投屏");
+            std::vector<BYTE> latestImage;
             while (!stop)
             {
                 auto start = std::chrono::steady_clock::now();
-                auto image = CaptureJpeg(encoder);
-                if (image.empty() || image.size() > 8 * 1024 * 1024)
-                    throw std::runtime_error("Captured frame is too large");
-                uint32_t length = htonl(static_cast<uint32_t>(image.size()));
-                SendAll(socket, reinterpret_cast<char const*>(&length), sizeof(length));
-                SendAll(socket, reinterpret_cast<char const*>(image.data()), image.size());
+                auto image = capture.CaptureJpeg(encoder);
+                if (!image.empty()) latestImage = std::move(image);
+                if (!latestImage.empty())
+                {
+                    if (latestImage.size() > 8 * 1024 * 1024)
+                        throw std::runtime_error("Captured frame is too large");
+                    uint32_t length = htonl(static_cast<uint32_t>(latestImage.size()));
+                    SendAll(socket, reinterpret_cast<char const*>(&length), sizeof(length));
+                    SendAll(socket, reinterpret_cast<char const*>(latestImage.data()), latestImage.size());
+                }
                 std::this_thread::sleep_until(start + std::chrono::milliseconds(100));
             }
         }

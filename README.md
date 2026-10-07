@@ -1,6 +1,6 @@
 # LAN ScreenCast
 
-Windows → Android TV 局域网投屏项目。当前实现了基础画面投屏：Windows 采集主显示器，以最高约 1280 像素宽、10 FPS 的 JPEG 帧通过局域网发送；Android TV 或 Android 手机全屏显示。系统声音、自动发现、多显示器选择、配对验证、WebRTC 和断线重连仍在后续开发范围。
+Windows → Android TV 局域网投屏项目。当前实现了基础画面投屏：Windows 通过 DXGI 桌面复制采集主显示器，以最高约 1280 像素宽、10 FPS 的 JPEG 帧通过局域网发送；Android TV 或 Android 手机全屏显示。系统声音、自动发现、多显示器选择、配对验证、WebRTC 和断线重连仍在后续开发范围。
 
 ## 目录
 
