@@ -1,6 +1,6 @@
 # LAN ScreenCast
 
-Windows → Android TV 局域网投屏项目。当前为 **Milestone 0：项目骨架**。两端只显示等待界面并记录启动日志；设备发现、配对、信令、WebRTC、屏幕采集和音频尚未实现。
+Windows → Android TV 局域网投屏项目。当前实现了基础画面投屏：Windows 采集主显示器，以最高约 1280 像素宽、10 FPS 的 JPEG 帧通过局域网发送；Android TV 或 Android 手机全屏显示。系统声音、自动发现、多显示器选择、配对验证、WebRTC 和断线重连仍在后续开发范围。
 
 ## 目录
 
@@ -47,7 +47,7 @@ cd android-tv
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-安装后可在手机应用列表或 Android TV 启动器中找到 **LAN 投屏接收器**（深蓝底、青色屏幕图标）。打开后显示“等待连接”。日志位于应用私有目录 `files/logs/lanscreencast.log`。调试设备可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。
+安装后可在手机应用列表或 Android TV 启动器中找到 **LAN 投屏接收器**（深蓝底、青色屏幕图标）。打开后会显示设备局域网 IP 和端口 `47474`。在 Windows 端输入此 IP 并点击“开始投屏”，接收端会全屏显示主显示器画面；点击“停止投屏”返回等待界面。两端必须位于可互相访问的同一局域网，不能使用隔离客户端的访客 Wi-Fi。日志位于应用私有目录 `files/logs/lanscreencast.log`。调试设备可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。
 
 如果设备上曾安装不同签名的调试包，`adb install -r` 会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`；先卸载旧版，再安装新包。卸载会清除该应用的本地数据和日志。
 
@@ -55,4 +55,4 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 `.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows Release MSIX 和 Android Debug APK，并上传 `LANScreenCast-Windows-x64-MSIX` 与 `LANScreenCast-Android-TV-debug` 两个产物。
 
-`protocol/signaling.schema.json` 只定义消息外层字段；`protocol/protocol-version.md` 固定协议版本 1。该阶段没有网络消息交换。
+当前视频链路使用 TCP：连接后发送 ASCII `LSC1`，随后重复发送 4 字节大端帧长度及 JPEG 帧（每帧最多 8 MiB）。`protocol/signaling.schema.json` 保留后续信令消息的外层定义；`protocol/protocol-version.md` 固定信令协议版本 1。
