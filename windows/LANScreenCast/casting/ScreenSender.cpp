@@ -17,6 +17,12 @@ namespace LANScreenCast::casting
     {
         constexpr int port = 47474;
 
+        struct BitmapHandle
+        {
+            HBITMAP value;
+            ~BitmapHandle() { if (value) DeleteObject(value); }
+        };
+
         struct Runtime
         {
             ULONG_PTR gdiplusToken{};
@@ -57,7 +63,15 @@ namespace LANScreenCast::casting
             int sourceHeight = GetSystemMetrics(SM_CYSCREEN);
             int width = std::min(sourceWidth, 1280);
             int height = std::max(1, sourceHeight * width / sourceWidth);
-            HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
+            BITMAPINFO info{};
+            info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            info.bmiHeader.biWidth = width;
+            info.bmiHeader.biHeight = -height;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+            void* pixels = nullptr;
+            HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
             if (!memory || !bitmap)
             {
                 if (bitmap) DeleteObject(bitmap);
@@ -65,6 +79,7 @@ namespace LANScreenCast::casting
                 ReleaseDC(nullptr, screen);
                 throw std::runtime_error("Cannot allocate capture bitmap");
             }
+            BitmapHandle bitmapHandle{ bitmap };
             HGDIOBJ old = SelectObject(memory, bitmap);
             SetStretchBltMode(memory, HALFTONE);
             BOOL copied = StretchBlt(memory, 0, 0, width, height, screen, 0, 0,
@@ -73,13 +88,10 @@ namespace LANScreenCast::casting
             DeleteDC(memory);
             ReleaseDC(nullptr, screen);
             if (!copied)
-            {
-                DeleteObject(bitmap);
                 throw std::runtime_error("Desktop capture failed");
-            }
 
-            Gdiplus::Bitmap image(bitmap, nullptr);
-            DeleteObject(bitmap);
+            Gdiplus::Bitmap image(width, height, width * 4, PixelFormat32bppRGB,
+                static_cast<BYTE*>(pixels));
             IStream* stream = nullptr;
             if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)))
                 throw std::runtime_error("Cannot create JPEG stream");
