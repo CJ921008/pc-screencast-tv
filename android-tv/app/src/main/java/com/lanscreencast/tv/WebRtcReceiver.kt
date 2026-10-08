@@ -23,7 +23,7 @@ class WebRtcReceiver(
     companion object { const val PORT = 47475 }
     private val worker = Executors.newSingleThreadScheduledExecutor()
     private val egl = EglBase.create()
-    private var renderer: SurfaceViewRenderer? = null
+    @Volatile private var renderer: SurfaceViewRenderer? = null
     private var video: VideoTrack? = null
     private var peer: PeerConnection? = null
     private var socket: WebSocket? = null
@@ -39,6 +39,7 @@ class WebRtcReceiver(
     private var generation = 0
     private val renderedFrames = AtomicLong()
     private var previousRendered = 0L
+    private var decoderName = ""
     @Volatile private var acceptedAt = 0L
     private val supports1080 = runCatching {
         MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
@@ -54,7 +55,22 @@ class WebRtcReceiver(
 
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
+        Logging.enableLogToDebugOutput(Logging.Severity.LS_WARNING)
         val defaults = DefaultVideoDecoderFactory(egl.eglBaseContext)
+        val hardwareDecoders = HardwareVideoDecoderFactory(egl.eglBaseContext)
+        val softwareDecoders = PlatformSoftwareVideoDecoderFactory(egl.eglBaseContext)
+        fun logged(decoder: VideoDecoder?): VideoDecoder? = decoder?.let { actual ->
+            object : VideoDecoder by actual {
+                override fun initDecode(settings: VideoDecoder.Settings, callback: VideoDecoder.Callback): VideoCodecStatus {
+                    val result = actual.initDecode(settings, callback)
+                    if (result == VideoCodecStatus.OK) {
+                        val name = runCatching { actual.implementationName }.getOrDefault(actual.javaClass.simpleName)
+                        FileLogger.log(context, "INFO", "VIDEO", "DECODER", name)
+                    }
+                    return result
+                }
+            }
+        }
         decoderFactory = object : VideoDecoderFactory {
             override fun getSupportedCodecs(): Array<VideoCodecInfo> =
                 defaults.supportedCodecs.filter { it.name.equals("H264", true) &&
@@ -64,9 +80,10 @@ class WebRtcReceiver(
                     VideoCodecInfo(it.payload, it.name, params)
                 }.toTypedArray()
             override fun createDecoder(info: VideoCodecInfo): VideoDecoder? {
-                val result = defaults.createDecoder(info)
-                FileLogger.log(context, "INFO", "VIDEO", "DECODER", result?.implementationName ?: "unavailable")
-                return result
+                val hardware = logged(hardwareDecoders.createDecoder(info))
+                val software = logged(softwareDecoders.createDecoder(info))
+                return if (hardware != null && software != null) VideoDecoderFallback(software, hardware)
+                    else hardware ?: software
             }
         }
         factory = PeerConnectionFactory.builder().setVideoDecoderFactory(decoderFactory).createPeerConnectionFactory()
@@ -239,6 +256,7 @@ class WebRtcReceiver(
         decoded = 0; receivedBytes = 0; lostPackets = 0; receivedPackets = 0
         statsTime = System.currentTimeMillis()
         renderedFrames.set(0); previousRendered = 0
+        decoderName = ""
     }
 
     private fun addIce(value: Triple<String, String, Int>) {
@@ -255,9 +273,17 @@ class WebRtcReceiver(
                 FileLogger.log(context, "INFO", "VIDEO", "RESOLUTION", width.toString() + "x" + height + " rotation=" + rotation)
             }
         })
-        view.addFrameListener({ renderedFrames.incrementAndGet() }, 0f)
+        val listener = object : EglRenderer.FrameListener {
+            override fun onFrame(bitmap: android.graphics.Bitmap?) {
+                if (renderer === view) {
+                    renderedFrames.incrementAndGet()
+                    view.addFrameListener(this, 0f)
+                }
+            }
+        }
+        view.addFrameListener(listener, 0f)
         view.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
-        view.setEnableHardwareScaler(true)
+        view.setEnableHardwareScaler(false)
         dispatch { renderer = view; video?.addSink(view) }
     }
     fun releaseRenderer(view: SurfaceViewRenderer) { if (!worker.isShutdown) dispatch {
@@ -289,6 +315,11 @@ class WebRtcReceiver(
             val stats = JSONObject().put("fps", (rendered - previousRendered) * 1000.0 / elapsed)
                 .put("bitrate", (bytes - receivedBytes) * 8000.0 / elapsed).put("rttMs", rtt).put("lossPercent", loss)
                 .put("decoder", inbound.members["decoderImplementation"]?.toString() ?: "unknown")
+            val actualDecoder = stats.getString("decoder")
+            if (actualDecoder != "unknown" && actualDecoder != decoderName) {
+                decoderName = actualDecoder
+                FileLogger.log(context, "INFO", "VIDEO", "DECODER", decoderName)
+            }
             socket?.let { send(it, "stats", stats) }
             FileLogger.log(context, "INFO", "VIDEO", "STATS", stats.toString())
             decoded = frames; receivedBytes = bytes; statsTime = now; receivedPackets = received; lostPackets = lost

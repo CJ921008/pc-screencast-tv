@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <mfapi.h>
 #include "WebRtcSender.h"
+#include "SignalProtocol.h"
 #include "logging/FileLogger.h"
 #include <rtc/rtc.hpp>
 #include <algorithm>
@@ -125,12 +126,14 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     SYSTEM_INFO system{};GetSystemInfo(&system);
     auto emit = [&](AccessUnit unit) {
         if (shared->done || !track || !track->isOpen()) return;
-        track->sendFrame(reinterpret_cast<std::byte const*>(unit.bytes.data()), unit.bytes.size(),
-            rtc::FrameInfo(std::chrono::duration<double>(unit.time100ns / 10000000.0)));
+        try {
+            track->sendFrame(reinterpret_cast<std::byte const*>(unit.bytes.data()), unit.bytes.size(),
+                rtc::FrameInfo(std::chrono::duration<double>(unit.time100ns / 10000000.0)));
+        } catch (std::exception const& error) { shared->fail(error.what()); return; }
         ++sent; bytes += unit.bytes.size();
     };
     auto encoderStatus = [&] {
-        return std::wstring(encoder->Hardware() ? L"硬件 " : L"软件降级 720p ") + encoder->Name() +
+        return std::wstring(encoder->Hardware() ? L"硬件 " : L"当前显卡硬编码不可用，软件 720p ") + encoder->Name() +
             L" · " + std::to_wstring(settings.width) + L"×" + std::to_wstring(settings.height);
     };
     while (!stop) {
@@ -142,8 +145,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
         }
         for (auto const& raw : messages) {
             auto message = json::parse(raw);
-            if (message.at("protocolVersion") != 2 || !message.at("requestId").is_string() ||
-                !message.at("timestamp").is_number_integer()) throw std::runtime_error("Invalid signal envelope");
+            ValidateSignal(message,session);
             auto payload = message.at("payload");
             if (message.at("type") == "error") throw std::runtime_error(payload.value("message","Receiver error"));
             if (payload.value("sessionId","") != session) throw std::runtime_error("Invalid signal session");
@@ -249,13 +251,14 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             auto encodeStart=Clock::now();
             bool key = shared->forceKey.exchange(false) || frame.time100ns-lastKeyTime >= 20000000;
             if (key) lastKeyTime = frame.time100ns;
-            try { encoder->Encode(frame,key,shared->done,emit); }
-            catch (std::exception const&) {
+            try { encoder->Encode(frame,key,stop,emit); }
+            catch (std::exception const& error) {
                 if (!encoder->Hardware()) throw;
+                logging::FileLogger::Write(L"WARN",L"VIDEO",L"HARDWARE_FALLBACK",Wide(error.what()));
                 encoder = std::make_unique<H264Encoder>(capture.Device(),settings,true);
                 settings = encoder->Settings(); shared->forceKey = true;
                 onStatus(L"硬件编码失败，已切换软件 720p");
-                encoder->Encode(frame,true,shared->done,emit);
+                encoder->Encode(frame,true,stop,emit);
             }
             encodeUs+=std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-encodeStart).count();
             ++encodedFrames;

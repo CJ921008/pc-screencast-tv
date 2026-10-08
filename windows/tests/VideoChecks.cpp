@@ -6,6 +6,7 @@
 #include <mferror.h>
 #include <rtc/rtc.hpp>
 #include "../LANScreenCast/casting/MediaPipeline.h"
+#include "../LANScreenCast/casting/SignalProtocol.h"
 #include <iostream>
 #include <atomic>
 #include <chrono>
@@ -109,6 +110,18 @@ static void rtcLoopback(std::vector<AccessUnit> const& units) {
 }
 int main() {
     try {
+        std::string session="14a92ef7-721c-4670-b65e-cb6791be36dd";
+        nlohmann::json signal={{"protocolVersion",2},{"type","ping"},{"requestId",session},{"timestamp",0},{"payload",{{"sessionId",session}}}};
+        ValidateSignal(signal,session);
+        for(int test=0;test<4;++test) {
+            auto bad=signal;
+            if(test==0)bad["protocolVersion"]=1;
+            if(test==1)bad["requestId"]="invalid";
+            if(test==2)bad["timestamp"]=-1;
+            if(test==3)bad["payload"]["sessionId"]="wrong";
+            bool rejected=false;try{ValidateSignal(bad,session);}catch(...){rejected=true;}
+            require(rejected,"Invalid signal envelope was accepted");
+        }
         check(CoInitializeEx(nullptr,COINIT_MULTITHREADED));check(MFStartup(MF_VERSION));
         require(H264AnnexB({0,0,0,2,0x65,1})==std::vector<uint8_t>({0,0,0,1,0x65,1}),"AVCC normalization failed");
         std::vector<AccessUnit> units;std::atomic_bool stop{false};

@@ -71,6 +71,7 @@
     <ClInclude Include="casting\ScreenSender.h" />
     <ClInclude Include="casting\MediaPipeline.h" />
     <ClInclude Include="casting\WebRtcSender.h" />
+    <ClInclude Include="casting\SignalProtocol.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
