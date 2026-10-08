@@ -13,6 +13,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.thread
 
 class WebRtcReceiver(
     private val context: Context,
@@ -52,6 +53,9 @@ class WebRtcReceiver(
     private val decoderFactory: VideoDecoderFactory
     private val factory: PeerConnectionFactory
     private val server: WebSocketServer
+    @Volatile private var closing = false
+    private val lifecycle = Any()
+    private var starter: Thread? = null
 
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
@@ -118,7 +122,17 @@ class WebRtcReceiver(
 
     fun start() {
         server.setReuseAddr(true)
-        server.start()
+        starter = thread(name = "signaling-start", isDaemon = true) {
+            try {
+                ReusableListener.bind(PORT, { !closing }).close()
+                synchronized(lifecycle) { if (!closing) server.start() }
+            } catch (error: Exception) {
+                if (!closing) {
+                    FileLogger.log(context, "ERROR", "SIGNAL", "START_FAILED", error.message.orEmpty())
+                    onStatus("信令服务启动失败：" + error.message, false)
+                }
+            }
+        }
         worker.scheduleAtFixedRate({
             val conn = socket ?: return@scheduleAtFixedRate
             val now = System.currentTimeMillis()
@@ -348,6 +362,8 @@ class WebRtcReceiver(
         FileLogger.log(context, "INFO", "SIGNAL", "CLOSED", message)
     }
     fun close() {
+        synchronized(lifecycle) { closing = true }
+        starter?.join(1000)
         server.stop(500)
         worker.submit { end("接收端已停止"); renderer?.release(); renderer = null }.get(2, TimeUnit.SECONDS)
         worker.shutdownNow()

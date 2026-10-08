@@ -6,7 +6,6 @@ import android.graphics.BitmapFactory
 import com.lanscreencast.tv.logging.FileLogger
 import java.io.DataInputStream
 import java.io.EOFException
-import java.net.InetSocketAddress
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -46,10 +45,8 @@ class ScreenReceiver(
         running = true
         thread(name = "screen-receiver", isDaemon = true) {
             try {
-                ServerSocket().use { listening ->
+                ReusableListener.bind(PORT, { running }).use { listening ->
                     server = listening
-                    listening.reuseAddress = true
-                    listening.bind(InetSocketAddress(PORT))
                     listening.soTimeout = 1000
                     FileLogger.log(context, "INFO", "NETWORK", "LISTENING", "TCP port $PORT")
                     while (running) {
