@@ -56,6 +56,20 @@ struct Shared {
     std::atomic_uint64_t dropped{0}, captureUs{0};
     void fail(std::string const& value) { std::lock_guard lock(mutex); if (!done && error.empty()) error = value; ready.notify_all(); }
 };
+struct FrameTimer {
+    HANDLE handle=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+    FrameTimer(){if(!handle)throw std::runtime_error("High-resolution frame timer unavailable");}
+    ~FrameTimer(){CloseHandle(handle);}
+    void until(Clock::time_point deadline) {
+        auto remaining=std::chrono::duration_cast<std::chrono::nanoseconds>(deadline-Clock::now()).count();
+        if(remaining<=0)return;
+        LARGE_INTEGER due{};due.QuadPart=-std::max<int64_t>(1,remaining/100);
+        if(!SetWaitableTimer(handle,&due,0,nullptr,nullptr,FALSE))
+            throw std::runtime_error("Cannot schedule video frame");
+        if(WaitForSingleObject(handle,INFINITE)!=WAIT_OBJECT_0)
+            throw std::runtime_error("Video frame timer failed");
+    }
+};
 void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bool const& stop,
     std::function<void(std::wstring const&)> const& onStatus) {
     WSADATA sockets{};
@@ -237,6 +251,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             onStatus(L"正在投屏 · " + encoderStatus());
             producer = std::thread([shared,&capture,fps=settings.fps] {
                 try {
+                    FrameTimer timer;
                     auto period = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0/fps));
                     while (!shared->done) {
                         auto start = Clock::now(); auto frame = capture.Next(fps);
@@ -246,7 +261,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                             if (shared->frames.size() == 2) {shared->frames.pop_front();++shared->dropped;}
                             shared->frames.push_back(std::move(frame)); shared->ready.notify_all();
                         }
-                        std::this_thread::sleep_until(start + period);
+                        timer.until(start + period);
                     }
                 } catch (std::exception const& error) { shared->fail(error.what()); }
             });
