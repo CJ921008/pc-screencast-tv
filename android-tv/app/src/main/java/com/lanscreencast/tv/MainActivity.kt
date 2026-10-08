@@ -1,6 +1,7 @@
 package com.lanscreencast.tv
 
 import android.graphics.Bitmap
+import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
@@ -29,8 +30,12 @@ import kotlin.math.min
 
 class MainActivity : ComponentActivity() {
     private var casting by mutableStateOf(false)
+    private var rtcCasting by mutableStateOf(false)
     private var status by mutableStateOf("等待连接")
     private lateinit var receiver: ScreenReceiver
+    private lateinit var rtcReceiver: WebRtcReceiver
+    private val gate = SessionGate()
+    private var requestDialog: AlertDialog? = null
     @Volatile private var surfaceView: SurfaceView? = null
     private val framePaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private var sampleStart = SystemClock.elapsedRealtime()
@@ -40,6 +45,21 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         FileLogger.log(this, "INFO", "APP", "STARTED", "Receiver waiting for connection")
+        rtcReceiver = WebRtcReceiver(this, gate,
+            onRequest = { name, reply -> runOnUiThread {
+                requestDialog?.dismiss()
+                requestDialog = AlertDialog.Builder(this).setTitle("允许投屏？")
+                    .setMessage(name + " 请求向此设备投屏")
+                    .setPositiveButton("接受") { _, _ -> reply(true) }
+                    .setNegativeButton("拒绝") { _, _ -> reply(false) }
+                    .setOnCancelListener { reply(false) }.show()
+            } },
+            onStatus = { value, active -> runOnUiThread {
+                status = value; rtcCasting = active
+                if (!active) requestDialog?.dismiss()
+                showFullscreen(active)
+            } })
+        rtcReceiver.start()
         receiver = ScreenReceiver(
             this,
             onFrame = ::drawFrame,
@@ -49,11 +69,16 @@ class MainActivity : ComponentActivity() {
                 if (!casting) surfaceView = null
                 showFullscreen(casting)
             } },
+            acquire = { gate.acquire("jpeg") },
+            release = { gate.release("jpeg") },
         )
         receiver.start()
         setContent {
             MaterialTheme {
-                if (casting) {
+                if (rtcCasting) {
+                    AndroidView(factory = { rtcReceiver.createRenderer() },
+                        onRelease = { rtcReceiver.releaseRenderer(it) }, modifier = Modifier.fillMaxSize())
+                } else if (casting) {
                     AndroidView(
                         factory = { context -> SurfaceView(context).also { surfaceView = it } },
                         modifier = Modifier.fillMaxSize(),
@@ -67,7 +92,8 @@ class MainActivity : ComponentActivity() {
                         Text("LAN 投屏接收器", style = MaterialTheme.typography.displayMedium)
                         Text(status, style = MaterialTheme.typography.headlineMedium)
                         Text("在 Windows 端输入以下 IP，点击开始投屏")
-                        Text("${ScreenReceiver.localAddress() ?: "未连接局域网"}:${ScreenReceiver.PORT}", style = MaterialTheme.typography.headlineMedium)
+                        Text(ScreenReceiver.localAddress() ?: "未连接局域网", style = MaterialTheme.typography.headlineMedium)
+                        Text("H.264 / WebRTC · 47475    JPEG 兼容 · 47474")
                         Text("电脑和接收设备须连接到同一局域网")
                     }
                 }
@@ -118,6 +144,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         receiver.stop()
+        requestDialog?.dismiss()
+        rtcReceiver.close()
         surfaceView = null
         super.onDestroy()
     }

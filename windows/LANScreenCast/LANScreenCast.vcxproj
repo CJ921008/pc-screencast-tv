@@ -24,6 +24,10 @@
     <RuntimeIdentifiers>win10-x64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
     <EnableMsixTooling>true</EnableMsixTooling>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgTriplet>x64-windows-static-md</VcpkgTriplet>
+    <VcpkgManifestRoot>$(MSBuildThisFileDirectory)..\</VcpkgManifestRoot>
+    <VcpkgInstalledDir>$(MSBuildThisFileDirectory)..\vcpkg_installed\</VcpkgInstalledDir>
   </PropertyGroup>
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
@@ -43,6 +47,7 @@
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration"><UseDebugLibraries>true</UseDebugLibraries><LinkIncremental>true</LinkIncremental></PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration"><UseDebugLibraries>false</UseDebugLibraries><WholeProgramOptimization>true</WholeProgramOptimization><LinkIncremental>false</LinkIncremental><WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained></PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(VCPKG_ROOT)\scripts\buildsystems\msbuild\vcpkg.props" Condition="Exists('$(VCPKG_ROOT)\scripts\buildsystems\msbuild\vcpkg.props')" />
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
@@ -53,6 +58,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <PreprocessorDefinitions>RTC_STATIC;RTC_ENABLE_MEDIA=1;RTC_ENABLE_WEBSOCKET=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -63,6 +69,8 @@
     <ClInclude Include="MainWindow.xaml.h"><DependentUpon>MainWindow.xaml</DependentUpon></ClInclude>
     <ClInclude Include="logging\FileLogger.h" />
     <ClInclude Include="casting\ScreenSender.h" />
+    <ClInclude Include="casting\MediaPipeline.h" />
+    <ClInclude Include="casting\WebRtcSender.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -74,6 +82,8 @@
     <ClCompile Include="MainWindow.xaml.cpp"><DependentUpon>MainWindow.xaml</DependentUpon></ClCompile>
     <ClCompile Include="logging\FileLogger.cpp" />
     <ClCompile Include="casting\ScreenSender.cpp" />
+    <ClCompile Include="casting\MediaPipeline.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="casting\WebRtcSender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup><Midl Include="Project.idl"><SubType>Code</SubType></Midl></ItemGroup>
@@ -87,4 +97,5 @@
   </ItemGroup>
   <ItemGroup Condition="'$(EnableMsixTooling)'=='true'"><ProjectCapability Include="Msix" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="$(VCPKG_ROOT)\scripts\buildsystems\msbuild\vcpkg.targets" Condition="Exists('$(VCPKG_ROOT)\scripts\buildsystems\msbuild\vcpkg.targets')" />
 </Project>

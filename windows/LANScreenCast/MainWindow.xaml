@@ -8,7 +8,15 @@
             <TextBlock Text="Windows 桌面投屏" FontSize="22" />
             <TextBlock Text="在接收设备上打开 LAN 投屏接收器，输入画面显示的 IP 地址。电脑与接收设备须处于同一局域网。" TextWrapping="Wrap" />
             <TextBox x:Name="ReceiverIp" Header="接收设备 IP 地址" PlaceholderText="例如 192.168.1.25" />
-            <ComboBox x:Name="FrameRate" Header="目标帧率" SelectedIndex="2">
+            <ComboBox x:Name="TransportMode" Header="视频模式" SelectedIndex="0">
+                <ComboBoxItem Content="H.264 / WebRTC" />
+                <ComboBoxItem Content="JPEG 兼容模式（720p）" />
+            </ComboBox>
+            <ComboBox x:Name="Resolution" Header="分辨率" SelectedIndex="0">
+                <ComboBoxItem Content="720p" />
+                <ComboBoxItem Content="1080p" />
+            </ComboBox>
+            <ComboBox x:Name="FrameRate" Header="目标帧率" SelectedIndex="3">
                 <ComboBoxItem Content="10 FPS" />
                 <ComboBoxItem Content="15 FPS" />
                 <ComboBoxItem Content="20 FPS" />

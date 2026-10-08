@@ -11,8 +11,8 @@ android {
         applicationId = "com.lanscreencast.tv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -28,6 +28,8 @@ android {
 }
 
 dependencies {
+    implementation("io.github.webrtc-sdk:android:144.7559.15")
+    implementation("org.java-websocket:Java-WebSocket:1.6.0")
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")

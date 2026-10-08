@@ -16,3 +16,6 @@ windows/**/bin/
 *.user
 *.suo
 .DS_Store
+windows/vcpkg_installed/
+.vcpkg/
+windows/tests/build/

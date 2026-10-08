@@ -17,6 +17,8 @@ class ScreenReceiver(
     private val context: Context,
     private val onFrame: (Bitmap) -> Unit,
     private val onStatus: (String) -> Unit,
+    private val acquire: () -> Boolean = { true },
+    private val release: () -> Unit = {},
 ) {
     companion object {
         const val PORT = 47474
@@ -49,6 +51,7 @@ class ScreenReceiver(
                     while (running) {
                         try {
                             listening.accept().use { socket ->
+                                if (!acquire()) return@use
                                 client = socket
                                 socket.soTimeout = 5000
                                 receive(socket)
@@ -61,7 +64,10 @@ class ScreenReceiver(
                                 onStatus("连接已断开，等待重新连接")
                             }
                         } finally {
-                            if (client != null && running) onStatus("等待连接")
+                            if (client != null) {
+                                release()
+                                if (running) onStatus("等待连接")
+                            }
                             client = null
                         }
                     }

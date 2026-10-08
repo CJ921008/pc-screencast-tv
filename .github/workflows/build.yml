@@ -31,9 +31,25 @@ jobs:
 
   windows:
     runs-on: windows-2022
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-bincache,readwrite
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
+      - name: Prepare pinned vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git .vcpkg
+          git -C .vcpkg checkout 2750401336fb7c95f6619657a46a7e798661341c
+          & ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          New-Item -ItemType Directory -Force .vcpkg-bincache | Out-Null
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .vcpkg-bincache
+            .vcpkg/downloads
+          key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json') }}
       - name: Build Release MSIX
         shell: pwsh
         run: msbuild windows/LANScreenCast.sln /restore /m /p:Configuration=Release /p:Platform=x64 /p:GenerateAppxPackageOnBuild=true /p:AppxPackageSigningEnabled=false /p:AppxBundle=Never
