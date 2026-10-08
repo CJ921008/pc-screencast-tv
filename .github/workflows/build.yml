@@ -21,7 +21,7 @@ jobs:
         run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - name: Build Android TV app
         working-directory: android-tv
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
       - name: Upload Android TV APK
         uses: actions/upload-artifact@v4
         with:
@@ -44,7 +44,20 @@ jobs:
           git -C .vcpkg checkout 2750401336fb7c95f6619657a46a7e798661341c
           & ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
           New-Item -ItemType Directory -Force .vcpkg-bincache | Out-Null
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: vcpkg-cache
+        with:
+          path: |
+            .vcpkg-bincache
+            .vcpkg/downloads
+          key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json') }}
+      - name: Install native media dependencies
+        shell: pwsh
+        run: |
+          & ./.vcpkg/vcpkg.exe install --x-manifest-root=windows --x-install-root=windows/vcpkg_installed --triplet=x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg dependency build failed' }
+      - uses: actions/cache/save@v4
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         with:
           path: |
             .vcpkg-bincache
@@ -53,6 +66,16 @@ jobs:
       - name: Build Release MSIX
         shell: pwsh
         run: msbuild windows/LANScreenCast.sln /restore /m /p:Configuration=Release /p:Platform=x64 /p:GenerateAppxPackageOnBuild=true /p:AppxPackageSigningEnabled=false /p:AppxBundle=Never
+      - name: Test software H264 and WebRTC loopback
+        shell: pwsh
+        run: |
+          Install-WindowsFeature Server-Media-Foundation
+          cmake -S windows/tests -B windows/tests/build -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/windows/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DVCPKG_MANIFEST_MODE=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Native test configuration failed' }
+          cmake --build windows/tests/build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Native test build failed' }
+          ctest --test-dir windows/tests/build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Native media tests failed' }
       - name: Sign test package
         shell: pwsh
         run: |

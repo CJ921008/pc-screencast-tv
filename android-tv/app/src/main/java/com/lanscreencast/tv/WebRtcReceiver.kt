@@ -35,6 +35,7 @@ class WebRtcReceiver(
     private var statsTime = 0L
     private var lostPackets = 0L
     private var receivedPackets = 0L
+    private var generation = 0
     private val supports1080 = runCatching {
         MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
             !info.isEncoder && info.supportedTypes.any { type ->
@@ -110,18 +111,19 @@ class WebRtcReceiver(
         val type = message.getString("type")
         val payload = message.getJSONObject("payload")
         if (type == "hello") {
+            val requestedSession = payload.getString("sessionId")
+            UUID.fromString(requestedSession)
+            val name = payload.getString("computerName").take(128)
             if (socket != null || !gate.acquire("webrtc")) {
                 send(conn, "error", JSONObject().put("code", "BUSY").put("message", "接收端正在使用"))
                 conn.close(1008, "Busy")
                 return
             }
-            session = payload.getString("sessionId")
-            UUID.fromString(session)
+            session = requestedSession
             socket = conn
             state.hello()
             lastAlive = System.currentTimeMillis()
             deadline = lastAlive + 30000 // Human acceptance is separate from the media handshake.
-            val name = payload.getString("computerName").take(128)
             onRequest(name) { allowed -> worker.execute {
                 if (socket !== conn || state.stage != SignalState.Stage.PENDING) return@execute
                 if (!allowed) {
@@ -177,6 +179,7 @@ class WebRtcReceiver(
     }
 
     private fun createPeer() {
+        val epoch = ++generation
         val config = PeerConnection.RTCConfiguration(emptyList())
         config.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         config.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
@@ -186,6 +189,7 @@ class WebRtcReceiver(
             override fun onIceConnectionReceivingChange(value: Boolean) {}
             override fun onIceGatheringChange(value: PeerConnection.IceGatheringState) {}
             override fun onIceCandidate(value: IceCandidate) { worker.execute {
+                if (epoch != generation) return@execute
                 socket?.let { send(it, "ice_candidate", JSONObject().put("candidate", value.sdp)
                     .put("mid", value.sdpMid).put("mLineIndex", value.sdpMLineIndex)) }
             } }
@@ -195,6 +199,7 @@ class WebRtcReceiver(
             override fun onDataChannel(value: DataChannel) { value.close() }
             override fun onRenegotiationNeeded() {}
             override fun onConnectionChange(value: PeerConnection.PeerConnectionState) { worker.execute {
+                if (epoch != generation) return@execute
                 when (value) {
                     PeerConnection.PeerConnectionState.CONNECTED -> {
                         if (state.stage == SignalState.Stage.OFFER) state.activate()
@@ -205,6 +210,7 @@ class WebRtcReceiver(
                 }
             } }
             override fun onTrack(value: RtpTransceiver) { worker.execute {
+                if (epoch != generation) return@execute
                 val track = value.receiver.track() as? VideoTrack ?: return@execute
                 video = track
                 renderer?.let { track.addSink(it) }
@@ -225,7 +231,7 @@ class WebRtcReceiver(
         view.setEnableHardwareScaler(true)
         worker.execute { renderer = view; video?.addSink(view) }
     }
-    fun releaseRenderer(view: SurfaceViewRenderer) { worker.execute {
+    fun releaseRenderer(view: SurfaceViewRenderer) { if (!worker.isShutdown) worker.execute {
         if (renderer === view) {
             video?.removeSink(view)
             renderer = null
@@ -266,6 +272,7 @@ class WebRtcReceiver(
             .put("timestamp", System.currentTimeMillis()).put("payload", payload).toString())
     }
     private fun end(message: String) {
+        ++generation
         val old = socket
         socket = null
         video?.let { track -> renderer?.let { track.removeSink(it) } }

@@ -3,12 +3,14 @@
 #include "MediaPipeline.h"
 #include "logging/FileLogger.h"
 #include <d3d11_1.h>
+#include <d3d11_4.h>
 #include <dxgi1_2.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mftransform.h>
 #include <mferror.h>
 #include <codecapi.h>
+#include <strmif.h>
 #include <algorithm>
 #include <chrono>
 #include <thread>

@@ -28,6 +28,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation("io.github.webrtc-sdk:android:144.7559.15")
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")

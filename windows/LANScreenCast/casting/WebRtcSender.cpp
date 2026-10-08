@@ -6,6 +6,7 @@
 #include "WebRtcSender.h"
 #include "logging/FileLogger.h"
 #include <rtc/rtc.hpp>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <deque>
@@ -152,8 +153,6 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                     if (state == rtc::PeerConnection::State::Failed || state == rtc::PeerConnection::State::Disconnected)
                         shared->fail("WebRTC 视频连接已断开");
                 });
-                pc->onLocalDescription([send](rtc::Description description) { send("offer", {{"sdp",std::string(description)}}); });
-                // Install below with video settings in the offer.
                 pc->onLocalDescription([send,settings](rtc::Description description) {
                     send("offer", {{"sdp",std::string(description)},{"video",{{"width",settings.width},
                         {"height",settings.height},{"fps",settings.fps},{"bitrate",settings.bitrate}}}});
