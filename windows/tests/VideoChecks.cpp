@@ -140,6 +140,25 @@ int main() {
         int keys=0;for(auto const& unit:units)if(unit.keyframe)++keys;
         require(keys>=2,"Keyframe request was ignored");
         int decoded=decode(units);require(decoded>=55,"H264 bitstream did not decode");
+        {
+            ComPtr<ID3D11Device> device;
+            check(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr));
+            H264Encoder encoder(device.Get(),VideoSettings{},true);
+            int converted=0;
+            for(int i=0;i<8;++i) {
+                std::vector<uint8_t> bgra(1280*720*4);
+                for(size_t p=0;p<bgra.size();p+=4){bgra[p]=uint8_t(i*20);bgra[p+1]=100;bgra[p+2]=200;bgra[p+3]=255;}
+                D3D11_TEXTURE2D_DESC desc{};desc.Width=1280;desc.Height=720;desc.MipLevels=desc.ArraySize=1;
+                desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_RENDER_TARGET;
+                D3D11_SUBRESOURCE_DATA data{};data.pSysMem=bgra.data();data.SysMemPitch=1280*4;
+                VideoFrame frame;check(device->CreateTexture2D(&desc,&data,&frame.texture));frame.time100ns=i*10000000LL/30;
+                encoder.Encode(frame,i==0,stop,[&](AccessUnit){++converted;});
+            }
+            encoder.Drain([&](AccessUnit){++converted;});
+            require(converted>=6,"BGRA to NV12 fallback did not encode");
+            std::cout<<"BGRA conversion frames: "<<converted<<std::endl;
+        }
         std::cout<<"Software H264 encoded/decoded: "<<units.size()<<"/"<<decoded<<std::endl;
         rtcLoopback(units);MFShutdown();CoUninitialize();return 0;
     } catch(std::exception const& error) {std::cerr<<error.what()<<std::endl;return 1;}

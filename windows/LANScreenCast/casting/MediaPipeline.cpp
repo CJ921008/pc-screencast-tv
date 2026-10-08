@@ -127,6 +127,8 @@ struct H264Encoder::Impl {
     ComPtr<ID3D11VideoProcessorEnumerator> enumerator;
     ComPtr<ID3D11VideoProcessor> processor;
     ComPtr<ID3D11Texture2D> staging;
+    ComPtr<ID3D11Texture2D> cpuStaging;
+    bool gpuConversion = true;
     UINT inputWidth = 0, inputHeight = 0;
     ComPtr<IMFTransform> transform;
     ComPtr<IMFMediaEventGenerator> events;
@@ -222,7 +224,10 @@ struct H264Encoder::Impl {
         return selected;
     }
     Impl(ID3D11Device* d, VideoSettings s, bool force) : device(d), settings(s) {
-        if (device) { device->GetImmediateContext(&context); Check(device.As(&videoDevice), "Video device"); Check(context.As(&videoContext), "Video context"); }
+        if (device) {
+            device->GetImmediateContext(&context);
+            gpuConversion = SUCCEEDED(device.As(&videoDevice)) && SUCCEEDED(context.As(&videoContext));
+        }
         if (device && !force && select(true)) return;
         settings.width = 1280; settings.height = 720; settings.bitrate = 4000000;
         if (!select(false)) throw std::runtime_error("No usable H264 encoder");
@@ -248,7 +253,7 @@ struct H264Encoder::Impl {
         memcpy(data, bytes.data(), bytes.size()); buffer->Unlock(); buffer->SetCurrentLength(static_cast<DWORD>(bytes.size()));
         return sample(buffer, time);
     }
-    ComPtr<IMFSample> convert(VideoFrame const& frame) {
+    ComPtr<IMFSample> convertGPU(VideoFrame const& frame) {
         D3D11_TEXTURE2D_DESC source{}; frame.texture->GetDesc(&source);
         if (!processor || inputWidth != source.Width || inputHeight != source.Height) {
             inputWidth = source.Width; inputHeight = source.Height;
@@ -315,6 +320,52 @@ struct H264Encoder::Impl {
             memcpy(bytes.data() + y * settings.width, sourceBytes + y * mapped.RowPitch, settings.width);
         context->Unmap(staging.Get(), 0);
         return memorySample(bytes, frame.time100ns);
+    }
+    ComPtr<IMFSample> convertCPU(VideoFrame const& frame) {
+        D3D11_TEXTURE2D_DESC desc{}; frame.texture->GetDesc(&desc);
+        D3D11_TEXTURE2D_DESC previous{}; if(cpuStaging)cpuStaging->GetDesc(&previous);
+        if(!cpuStaging || previous.Width!=desc.Width || previous.Height!=desc.Height) {
+            cpuStaging.Reset();desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+            Check(device->CreateTexture2D(&desc,nullptr,&cpuStaging),"CPU color-conversion readback");
+        }
+        context->CopyResource(cpuStaging.Get(),frame.texture.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};Check(context->Map(cpuStaging.Get(),0,D3D11_MAP_READ,0,&mapped),"Map BGRA for software conversion");
+        struct Unmap { ID3D11DeviceContext* c;ID3D11Texture2D* t;~Unmap(){c->Unmap(t,0);} } unmap{context.Get(),cpuStaging.Get()};
+        bool portrait=frame.rotation==DXGI_MODE_ROTATION_ROTATE90 || frame.rotation==DXGI_MODE_ROTATION_ROTATE270;
+        int sw=int(desc.Width),sh=int(desc.Height),logicalW=portrait?sh:sw,logicalH=portrait?sw:sh;
+        float scale=std::min(float(settings.width)/logicalW,float(settings.height)/logicalH);
+        int width=std::max(2,int(logicalW*scale)&~1),height=std::max(2,int(logicalH*scale)&~1);
+        int left=((settings.width-width)/2)&~1,top=((settings.height-height)/2)&~1;
+        struct RGB {int r,g,b;};
+        auto pixel=[&](int x,int y)->RGB {
+            if(x<left || y<top || x>=left+width || y>=top+height)return {0,0,0};
+            int lx=(x-left)*logicalW/width,ly=(y-top)*logicalH/height,sx=lx,sy=ly;
+            if(frame.rotation==DXGI_MODE_ROTATION_ROTATE90){sx=ly;sy=sh-1-lx;}
+            if(frame.rotation==DXGI_MODE_ROTATION_ROTATE180){sx=sw-1-lx;sy=sh-1-ly;}
+            if(frame.rotation==DXGI_MODE_ROTATION_ROTATE270){sx=sw-1-ly;sy=lx;}
+            auto p=static_cast<BYTE*>(mapped.pData)+sy*mapped.RowPitch+sx*4;
+            return {p[2],p[1],p[0]};
+        };
+        int w=settings.width,h=settings.height;
+        std::vector<uint8_t> bytes(w*h*3/2);
+        for(int y=0;y<h;y+=2)for(int x=0;x<w;x+=2) {
+            int r=0,g=0,b=0;
+            for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx) {
+                auto c=pixel(x+dx,y+dy);r+=c.r;g+=c.g;b+=c.b;
+                bytes[(y+dy)*w+x+dx]=uint8_t(std::clamp(16+((47*c.r+157*c.g+16*c.b+128)>>8),16,235));
+            }
+            r/=4;g/=4;b/=4;
+            bytes[w*h+(y/2)*w+x]=uint8_t(std::clamp(128+((-26*r-87*g+113*b+128)>>8),16,240));
+            bytes[w*h+(y/2)*w+x+1]=uint8_t(std::clamp(128+((112*r-102*g-10*b+128)>>8),16,240));
+        }
+        return memorySample(bytes,frame.time100ns);
+    }
+    ComPtr<IMFSample> convert(VideoFrame const& frame) {
+        if(gpuConversion) {
+            try{return convertGPU(frame);}
+            catch(std::exception const& error){OutputDebugStringA(error.what());gpuConversion=false;processor.Reset();enumerator.Reset();staging.Reset();}
+        }
+        return convertCPU(frame);
     }
     bool output(std::function<void(AccessUnit)> const& emit, int changes = 0) {
         MFT_OUTPUT_STREAM_INFO info{}; Check(transform->GetOutputStreamInfo(0, &info), "Encoder output buffer info");

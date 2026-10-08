@@ -223,6 +223,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
         if (!started && now > handshakeDeadline) throw std::runtime_error("视频建链超时");
         if (shared->trackOpen && !started) {
             started = true; statsStart = Clock::now();
+            previousCpu=processTime();
             logging::FileLogger::Write(L"INFO",L"VIDEO",L"ENCODER",encoderStatus());
             onStatus(L"正在投屏 · " + encoderStatus());
             producer = std::thread([shared,&capture,fps=settings.fps] {
