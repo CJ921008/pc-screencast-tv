@@ -55,6 +55,9 @@ struct Shared {
 };
 void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bool const& stop,
     std::function<void(std::wstring const&)> const& onStatus) {
+    WSADATA sockets{};
+    if(WSAStartup(MAKEWORD(2,2),&sockets)!=0)throw std::runtime_error("Winsock initialization failed");
+    struct SocketRuntime {~SocketRuntime(){WSACleanup();}} socketRuntime;
     in_addr address{}; if (InetPtonW(AF_INET, ip.c_str(), &address) != 1) throw std::runtime_error("请输入有效的 IPv4 地址");
     HRESULT apartment = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(apartment)) throw std::runtime_error("COM initialization failed");

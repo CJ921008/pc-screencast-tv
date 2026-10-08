@@ -151,7 +151,7 @@ struct H264Encoder::Impl {
         Check(activation->ActivateObject(IID_PPV_ARGS(&transform)), "Activate H264 encoder");
         UINT32 length = 0; wchar_t* label = nullptr;
         if (SUCCEEDED(activation->GetAllocatedString(MFT_FRIENDLY_NAME_Attribute, &label, &length))) {
-            name.assign(label, length); CoTaskMemFree(label);
+            name.assign(label); CoTaskMemFree(label);
         }
         hardware = hw;
         ComPtr<IMFAttributes> attrs; Check(transform->GetAttributes(&attrs), "Encoder attributes");
