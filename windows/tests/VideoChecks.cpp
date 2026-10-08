@@ -115,6 +115,7 @@ int main() {
         {
             H264Encoder encoder(nullptr,VideoSettings{},true);
             for(int i=0;i<60;++i) {
+                if(i==0 || i==30) encoder.ForceKeyFrame();
                 std::vector<uint8_t> frame(1280*720*3/2,128);
                 for(int y=0;y<720;++y) for(int x=0;x<1280;++x) frame[y*1280+x]=uint8_t(16+((x+i*8)%220));
                 encoder.EncodeNV12(frame,i*10000000LL/30,stop,[&](AccessUnit unit){units.push_back(std::move(unit));});
@@ -122,6 +123,9 @@ int main() {
             encoder.Drain([&](AccessUnit unit){units.push_back(std::move(unit));});
         }
         require(units.size()>=55,"Too few encoded frames");
+        for(size_t i=1;i<units.size();++i) require(units[i].time100ns>units[i-1].time100ns,"Nonmonotonic H264 timestamps");
+        int keys=0;for(auto const& unit:units)if(unit.keyframe)++keys;
+        require(keys>=2,"Keyframe request was ignored");
         int decoded=decode(units);require(decoded>=55,"H264 bitstream did not decode");
         std::cout<<"Software H264 encoded/decoded: "<<units.size()<<"/"<<decoded<<std::endl;
         rtcLoopback(units);MFShutdown();CoUninitialize();return 0;

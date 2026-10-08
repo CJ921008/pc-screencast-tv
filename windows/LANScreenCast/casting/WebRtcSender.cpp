@@ -49,6 +49,7 @@ struct Shared {
     std::condition_variable ready;
     std::string error;
     std::atomic_bool done{false}, trackOpen{false}, forceKey{true};
+    std::atomic_uint64_t dropped{0}, captureUs{0};
     void fail(std::string const& value) { std::lock_guard lock(mutex); if (!done && error.empty()) error = value; ready.notify_all(); }
 };
 void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bool const& stop,
@@ -113,7 +114,15 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     bool offered = false, answered = false, started = false;
     std::vector<rtc::Candidate> pendingIce;
     auto statsStart = Clock::now(); int sent = 0; uint64_t bytes = 0;
-    int framesSinceKey = 0;
+    int64_t lastKeyTime = -20000000;
+    uint64_t encodeUs = 0; int encodedFrames = 0;
+    auto processTime = [] {
+        FILETIME created{}, exited{}, kernel{}, user{}; GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user);
+        ULARGE_INTEGER k{},u{}; k.LowPart=kernel.dwLowDateTime;k.HighPart=kernel.dwHighDateTime;
+        u.LowPart=user.dwLowDateTime;u.HighPart=user.dwHighDateTime;return k.QuadPart+u.QuadPart;
+    };
+    auto previousCpu = processTime();
+    SYSTEM_INFO system{};GetSystemInfo(&system);
     auto emit = [&](AccessUnit unit) {
         if (shared->done || !track || !track->isOpen()) return;
         track->sendFrame(reinterpret_cast<std::byte const*>(unit.bytes.data()), unit.bytes.size(),
@@ -136,6 +145,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             if (message.at("protocolVersion") != 2 || !message.at("requestId").is_string() ||
                 !message.at("timestamp").is_number_integer()) throw std::runtime_error("Invalid signal envelope");
             auto payload = message.at("payload");
+            if (message.at("type") == "error") throw std::runtime_error(payload.value("message","Receiver error"));
             if (payload.value("sessionId","") != session) throw std::runtime_error("Invalid signal session");
             lastAlive = Clock::now();
             auto type = message.at("type").get<std::string>();
@@ -188,14 +198,21 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             } else if (type == "stats") {
                 if (!started) continue;
                 auto elapsed = std::chrono::duration<double>(Clock::now() - statsStart).count();
+                auto cpuTime = processTime();
+                double cpu = (cpuTime-previousCpu)/10000000.0/std::max(.1,elapsed)/system.dwNumberOfProcessors*100;
                 auto text = encoderStatus() + L" · 发送 " + std::to_wstring(int(sent / std::max(.1,elapsed))) +
                     L" FPS · 接收 " + std::to_wstring(int(payload.value("fps",0.0))) +
                     L" FPS · " + std::to_wstring(int(bytes * 8 / std::max(.1,elapsed) / 1000000)) +
                     L" Mbps · RTT " + std::to_wstring(int(payload.value("rttMs",0.0))) +
                     L" ms · 丢包 " + std::to_wstring(int(payload.value("lossPercent",0.0))) + L"%";
                 onStatus(text);
-                logging::FileLogger::Write(L"INFO",L"VIDEO",L"STATS",text);
+                payload["encoder"]=Utf8(encoder->Name());payload["hardware"]=encoder->Hardware();
+                payload["width"]=settings.width;payload["height"]=settings.height;payload["cpuPercent"]=cpu;
+                payload["encodeMs"]=encodedFrames ? encodeUs/1000.0/encodedFrames : 0;
+                payload["captureMs"]=shared->captureUs.load()/1000.0;payload["queueDropped"]=shared->dropped.load();
+                logging::FileLogger::Write(L"INFO",L"VIDEO",L"STATS",Wide(payload.dump()));
                 statsStart = Clock::now(); sent = 0; bytes = 0;
+                previousCpu=cpuTime;encodeUs=0;encodedFrames=0;
             } else throw std::runtime_error("Unknown receiver message");
         }
         auto now = Clock::now();
@@ -211,9 +228,10 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                     auto period = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0/fps));
                     while (!shared->done) {
                         auto start = Clock::now(); auto frame = capture.Next(fps);
+                        shared->captureUs=std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-start).count();
                         if (frame.texture) {
                             std::lock_guard lock(shared->mutex);
-                            if (shared->frames.size() == 2) shared->frames.pop_front();
+                            if (shared->frames.size() == 2) {shared->frames.pop_front();++shared->dropped;}
                             shared->frames.push_back(std::move(frame)); shared->ready.notify_all();
                         }
                         std::this_thread::sleep_until(start + period);
@@ -228,8 +246,9 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             if (!shared->frames.empty()) { frame = std::move(shared->frames.front()); shared->frames.pop_front(); }
         }
         if (frame.texture) {
-            bool key = shared->forceKey.exchange(false) || framesSinceKey++ >= settings.fps * 2;
-            if (key) framesSinceKey = 0;
+            auto encodeStart=Clock::now();
+            bool key = shared->forceKey.exchange(false) || frame.time100ns-lastKeyTime >= 20000000;
+            if (key) lastKeyTime = frame.time100ns;
             try { encoder->Encode(frame,key,shared->done,emit); }
             catch (std::exception const&) {
                 if (!encoder->Hardware()) throw;
@@ -238,6 +257,8 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                 onStatus(L"硬件编码失败，已切换软件 720p");
                 encoder->Encode(frame,true,shared->done,emit);
             }
+            encodeUs+=std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-encodeStart).count();
+            ++encodedFrames;
         }
     }
 }

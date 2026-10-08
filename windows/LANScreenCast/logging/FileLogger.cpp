@@ -41,8 +41,12 @@ namespace LANScreenCast::logging
                 << L"Z\t" << Clean(level) << L'\t' << Clean(module) << L'\t'
                 << Clean(event) << L'\t' << Clean(message) << L'\n';
 
-            std::wofstream file(path / L"lanscreencast.log", std::ios::app);
-            file << line.str();
+            auto text = line.str();
+            int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+            std::string utf8(size, 0);
+            WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), size, nullptr, nullptr);
+            std::ofstream file(path / L"lanscreencast.log", std::ios::app | std::ios::binary);
+            file.write(utf8.data(), utf8.size());
         }
         catch (...)
         {
@@ -50,4 +54,3 @@ namespace LANScreenCast::logging
         }
     }
 }
-

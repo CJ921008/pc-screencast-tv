@@ -12,6 +12,7 @@ namespace LANScreenCast::casting {
     struct VideoFrame {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         int64_t time100ns = 0;
+        DXGI_MODE_ROTATION rotation = DXGI_MODE_ROTATION_IDENTITY;
     };
     struct AccessUnit { std::vector<uint8_t> bytes; int64_t time100ns; bool keyframe; };
     class DesktopSource {
@@ -32,6 +33,7 @@ namespace LANScreenCast::casting {
         VideoSettings Settings() const;
         bool Hardware() const;
         std::wstring Name() const;
+        void ForceKeyFrame();
         void Encode(VideoFrame const& frame, bool keyframe, std::atomic_bool const& stop,
             std::function<void(AccessUnit)> const& emit);
         void EncodeNV12(std::vector<uint8_t> const& bytes, int64_t time,

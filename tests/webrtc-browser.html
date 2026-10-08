@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><title>LAN ScreenCast WebRTC receiver test</title>
+<canvas id="canvas"></canvas><pre id="status"></pre>
+<script>
+// Test-only sender. Open via localhost HTTP with ?ip=PHONE_IP&width=1280 or 1920.
+const args=new URLSearchParams(location.search), ip=args.get('ip'), width=+(args.get('width')||1280);
+const height=width===1920?1080:720, canvas=document.querySelector('canvas'), status=document.querySelector('pre');
+canvas.width=width;canvas.height=height;canvas.style.width='640px';
+const context=canvas.getContext('2d'), sessionId=crypto.randomUUID();
+const ws=new WebSocket('ws://'+ip+':47475/signaling'), pc=new RTCPeerConnection({iceServers:[]});
+const results=window.results={connected:false,stats:[],errors:[]};
+function send(type,payload={}) { ws.send(JSON.stringify({protocolVersion:2,type,requestId:crypto.randomUUID(),timestamp:Date.now(),payload:{sessionId,...payload}})); }
+function log(value) {status.textContent+=value+'\n';}
+let frame=0;
+setInterval(()=>{context.fillStyle='#102b3c';context.fillRect(0,0,width,height);context.fillStyle='#52dceb';context.fillRect((frame++*12)%width,50,100,height-100);context.fillStyle='white';context.font='40px sans-serif';context.fillText('H.264 '+width+'x'+height+' '+Date.now(),30,60)},1000/30);
+const transceiver=pc.addTransceiver(canvas.captureStream(30).getVideoTracks()[0],{direction:'sendonly'});
+const codecs=RTCRtpSender.getCapabilities('video').codecs.filter(x=>x.mimeType==='video/H264' && (x.sdpFmtpLine||'').includes('42e0'));
+transceiver.setCodecPreferences(codecs);
+pc.onicecandidate=e=>{if(e.candidate)send('ice_candidate',{candidate:e.candidate.candidate,mid:e.candidate.sdpMid,mLineIndex:e.candidate.sdpMLineIndex})};
+pc.onconnectionstatechange=()=>{log(pc.connectionState);results.connected=pc.connectionState==='connected'};
+ws.onopen=()=>send('hello',{computerName:'WebRTC browser acceptance test'});
+const pending=[];
+ws.onmessage=async e=>{
+ const message=JSON.parse(e.data),p=message.payload;
+ if(message.type==='capabilities') {
+   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+   send('offer',{sdp:offer.sdp,video:{width,height,fps:30,bitrate:width===1920?8000000:4000000}});
+ } else if(message.type==='answer') {
+   await pc.setRemoteDescription({type:'answer',sdp:p.sdp});
+   for(const candidate of pending.splice(0))await pc.addIceCandidate(candidate);
+ } else if(message.type==='ice_candidate') {
+   const candidate={candidate:p.candidate,sdpMid:p.mid,sdpMLineIndex:p.mLineIndex};
+   if(pc.remoteDescription)await pc.addIceCandidate(candidate);else pending.push(candidate);
+ } else if(message.type==='ping')send('pong');
+ else if(message.type==='stats'){results.stats.push(p);log(JSON.stringify(p))}
+ else if(message.type==='error'){results.errors.push(p);log(JSON.stringify(p))}
+};
+setInterval(()=>{if(ws.readyState===1)send('ping')},2000);
+window.stopTest=()=>{send('disconnect');pc.close();ws.close()};
+</script>

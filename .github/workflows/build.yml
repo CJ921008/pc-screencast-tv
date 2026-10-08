@@ -6,6 +6,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install jsonschema==4.23.0
+      - run: python protocol/check_schema.py
   android-tv:
     runs-on: ubuntu-latest
     steps:
@@ -86,6 +95,12 @@ jobs:
           New-Item -ItemType Directory -Path $output -Force | Out-Null
           $msix = Join-Path $output 'LANScreenCast-x64.msix'
           Copy-Item $packages[0].FullName $msix
+          Copy-Item THIRD_PARTY.md $output
+          $licenses = Join-Path $output 'licenses'
+          New-Item -ItemType Directory -Force $licenses | Out-Null
+          Get-ChildItem windows/vcpkg_installed/x64-windows-static-md/share -Filter copyright -Recurse | ForEach-Object {
+            Copy-Item $_.FullName (Join-Path $licenses ($_.Directory.Name + '.txt'))
+          }
           $dependencies = Join-Path $packages[0].DirectoryName 'Dependencies\x64'
           if (-not (Test-Path $dependencies)) { throw 'MSIX framework dependencies not found' }
           Copy-Item (Join-Path $packages[0].DirectoryName 'Dependencies') -Destination $output -Recurse

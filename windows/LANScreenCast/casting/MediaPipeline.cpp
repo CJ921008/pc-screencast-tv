@@ -1,7 +1,6 @@
 #define NOMINMAX
 #include <windows.h>
 #include "MediaPipeline.h"
-#include "logging/FileLogger.h"
 #include <d3d11_1.h>
 #include <d3d11_4.h>
 #include <dxgi1_2.h>
@@ -22,6 +21,7 @@
 #pragma comment(lib, "Mfplat.lib")
 #pragma comment(lib, "Mfuuid.lib")
 #pragma comment(lib, "Mf.lib")
+#pragma comment(lib, "Strmiids.lib")
 
 namespace LANScreenCast::casting {
 using Microsoft::WRL::ComPtr;
@@ -67,6 +67,7 @@ struct DesktopSource::Impl {
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IDXGIOutputDuplication> duplicate;
     ComPtr<ID3D11Texture2D> latest;
+    DXGI_MODE_ROTATION rotation = DXGI_MODE_ROTATION_IDENTITY;
     std::chrono::steady_clock::time_point origin = std::chrono::steady_clock::now();
     Impl() {
         ComPtr<IDXGIFactory1> factory; Check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "Create DXGI factory");
@@ -87,6 +88,7 @@ struct DesktopSource::Impl {
                 protection->SetMultithreadProtected(TRUE);
                 ComPtr<IDXGIOutput1> output1; Check(output.As(&output1), "Capture output");
                 Check(output1->DuplicateOutput(device.Get(), &duplicate), "Duplicate primary display");
+                rotation = d.Rotation;
                 return;
             }
         }
@@ -106,6 +108,7 @@ struct DesktopSource::Impl {
             context->CopyResource(copy.Get(), surface.Get()); latest = copy;
         }
         VideoFrame frame{latest};
+        frame.rotation = rotation;
         frame.time100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - origin).count() / 100;
         return frame;
@@ -270,11 +273,18 @@ struct H264Encoder::Impl {
         ComPtr<ID3D11VideoProcessorOutputView> output;
         Check(videoDevice->CreateVideoProcessorOutputView(nv12.Get(), enumerator.Get(), &ov, &output), "Processor output");
         RECT src{0,0,static_cast<LONG>(source.Width),static_cast<LONG>(source.Height)};
-        float scale = std::min(float(settings.width)/source.Width, float(settings.height)/source.Height);
-        LONG width = static_cast<LONG>(source.Width * scale) & ~1, height = static_cast<LONG>(source.Height * scale) & ~1;
+        bool portrait = frame.rotation == DXGI_MODE_ROTATION_ROTATE90 || frame.rotation == DXGI_MODE_ROTATION_ROTATE270;
+        UINT sourceWidth = portrait ? source.Height : source.Width, sourceHeight = portrait ? source.Width : source.Height;
+        float scale = std::min(float(settings.width)/sourceWidth, float(settings.height)/sourceHeight);
+        LONG width = static_cast<LONG>(sourceWidth * scale) & ~1, height = static_cast<LONG>(sourceHeight * scale) & ~1;
         RECT dst{(settings.width-width)/2,(settings.height-height)/2,(settings.width+width)/2,(settings.height+height)/2};
         RECT whole{0,0,settings.width,settings.height};
         videoContext->VideoProcessorSetStreamFrameFormat(processor.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+        auto rotation = D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY;
+        if (frame.rotation == DXGI_MODE_ROTATION_ROTATE90) rotation = D3D11_VIDEO_PROCESSOR_ROTATION_90;
+        if (frame.rotation == DXGI_MODE_ROTATION_ROTATE180) rotation = D3D11_VIDEO_PROCESSOR_ROTATION_180;
+        if (frame.rotation == DXGI_MODE_ROTATION_ROTATE270) rotation = D3D11_VIDEO_PROCESSOR_ROTATION_270;
+        videoContext->VideoProcessorSetStreamRotation(processor.Get(), 0, TRUE, rotation);
         videoContext->VideoProcessorSetStreamSourceRect(processor.Get(), 0, TRUE, &src);
         videoContext->VideoProcessorSetStreamDestRect(processor.Get(), 0, TRUE, &dst);
         videoContext->VideoProcessorSetOutputTargetRect(processor.Get(), TRUE, &whole);
@@ -370,8 +380,13 @@ H264Encoder::~H264Encoder() = default;
 VideoSettings H264Encoder::Settings() const { return impl->settings; }
 bool H264Encoder::Hardware() const { return impl->hardware; }
 std::wstring H264Encoder::Name() const { return impl->name; }
+void H264Encoder::ForceKeyFrame() {
+    if (!impl->codec) throw std::runtime_error("Encoder keyframe control unavailable");
+    VARIANT value{}; value.vt=VT_UI4; value.ulVal=1;
+    Check(impl->codec->SetValue(&CODECAPI_AVEncVideoForceKeyFrame,&value),"Request H264 IDR");
+}
 void H264Encoder::Encode(VideoFrame const& frame, bool key, std::atomic_bool const& stop, std::function<void(AccessUnit)> const& emit) {
-    if (key) impl->property(CODECAPI_AVEncVideoForceKeyFrame, 1);
+    if (key) ForceKeyFrame();
     impl->feed(impl->convert(frame).Get(), stop, emit);
 }
 void H264Encoder::EncodeNV12(std::vector<uint8_t> const& bytes, int64_t time, std::atomic_bool const& stop, std::function<void(AccessUnit)> const& emit) {

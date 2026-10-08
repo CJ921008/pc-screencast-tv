@@ -12,6 +12,7 @@ import java.net.InetSocketAddress
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 class WebRtcReceiver(
     private val context: Context,
@@ -36,6 +37,9 @@ class WebRtcReceiver(
     private var lostPackets = 0L
     private var receivedPackets = 0L
     private var generation = 0
+    private val renderedFrames = AtomicLong()
+    private var previousRendered = 0L
+    @Volatile private var acceptedAt = 0L
     private val supports1080 = runCatching {
         MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
             !info.isEncoder && info.supportedTypes.any { type ->
@@ -71,7 +75,7 @@ class WebRtcReceiver(
                 if (handshake.resourceDescriptor != "/signaling") conn.close(1008, "Invalid path")
             }
             override fun onMessage(conn: WebSocket, message: String) {
-                worker.execute {
+                dispatch {
                     try { handle(conn, message) } catch (error: Exception) {
                         send(conn, "error", JSONObject().put("code", "INVALID_MESSAGE").put("message", error.message ?: "Invalid message"))
                         if (conn === socket) end("信令错误：" + error.message) else conn.close(1008, "Invalid message")
@@ -79,12 +83,19 @@ class WebRtcReceiver(
                 }
             }
             override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean) {
-                worker.execute { if (conn === socket) end("连接已断开") }
+                dispatch { if (conn === socket) end("连接已断开") }
             }
             override fun onError(conn: WebSocket?, error: Exception) {
                 FileLogger.log(context, "ERROR", "SIGNAL", "ERROR", error.message.orEmpty())
             }
             override fun onStart() { FileLogger.log(context, "INFO", "SIGNAL", "LISTENING", PORT.toString()) }
+        }
+    }
+
+    private fun dispatch(action: () -> Unit) {
+        if (worker.isShutdown) return
+        runCatching { worker.execute(action) }.onFailure {
+            if (!worker.isShutdown) FileLogger.log(context, "ERROR", "SIGNAL", "DISPATCH_FAILED", it.message.orEmpty())
         }
     }
 
@@ -105,7 +116,12 @@ class WebRtcReceiver(
     private fun handle(conn: WebSocket, raw: String) {
         require(raw.length <= 1024 * 1024)
         val message = JSONObject(raw)
-        require(message.getInt("protocolVersion") == 2) { "Protocol version mismatch" }
+        if (message.optInt("protocolVersion") != 2) {
+            send(conn, "error", JSONObject().put("code", "VERSION_MISMATCH").put("message", "需要信令版本 2"))
+            conn.close(1008, "Version mismatch")
+            return
+        }
+        require(message.keys().asSequence().toSet() == setOf("protocolVersion", "type", "requestId", "timestamp", "payload"))
         UUID.fromString(message.getString("requestId"))
         require(message.getLong("timestamp") >= 0)
         val type = message.getString("type")
@@ -115,7 +131,7 @@ class WebRtcReceiver(
             UUID.fromString(requestedSession)
             val name = payload.getString("computerName").take(128)
             if (socket != null || !gate.acquire("webrtc")) {
-                send(conn, "error", JSONObject().put("code", "BUSY").put("message", "接收端正在使用"))
+                send(conn, "error", JSONObject().put("sessionId", requestedSession).put("code", "BUSY").put("message", "接收端正在使用"))
                 conn.close(1008, "Busy")
                 return
             }
@@ -124,13 +140,14 @@ class WebRtcReceiver(
             state.hello()
             lastAlive = System.currentTimeMillis()
             deadline = lastAlive + 30000 // Human acceptance is separate from the media handshake.
-            onRequest(name) { allowed -> worker.execute {
-                if (socket !== conn || state.stage != SignalState.Stage.PENDING) return@execute
+            onRequest(name) { allowed -> dispatch {
+                if (socket !== conn || state.stage != SignalState.Stage.PENDING) return@dispatch
                 if (!allowed) {
                     send(conn, "error", JSONObject().put("code", "REJECTED").put("message", "接收端拒绝连接"))
                     end("已拒绝连接")
                 } else {
                     state.accept()
+                    acceptedAt = System.currentTimeMillis()
                     deadline = System.currentTimeMillis() + 10000
                     send(conn, "capabilities", JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
                         .put("supports1080p30", supports1080))
@@ -153,17 +170,20 @@ class WebRtcReceiver(
                 createPeer()
                 val active = peer!!
                 active.setRemoteDescription(object : SdpObserverAdapter() {
-                    override fun onSetSuccess() { worker.execute {
-                        if (peer !== active) return@execute
+                    override fun onSetSuccess() { dispatch {
+                        if (peer !== active) return@dispatch
                         state.remoteDescriptionReady().forEach { addIce(it) }
                         active.createAnswer(object : SdpObserverAdapter() {
                             override fun onCreateSuccess(description: SessionDescription) {
+                                dispatch {
+                                if (peer !== active) return@dispatch
                                 active.setLocalDescription(object : SdpObserverAdapter() {
-                                    override fun onSetSuccess() { worker.execute {
+                                    override fun onSetSuccess() { dispatch {
                                         if (peer === active) send(conn, "answer", JSONObject().put("sdp", description.description))
                                     } }
                                     override fun onSetFailure(error: String) { fail(active, error) }
                                 }, description)
+                                }
                             }
                             override fun onCreateFailure(error: String) { fail(active, error) }
                         }, MediaConstraints())
@@ -188,8 +208,8 @@ class WebRtcReceiver(
             override fun onIceConnectionChange(value: PeerConnection.IceConnectionState) {}
             override fun onIceConnectionReceivingChange(value: Boolean) {}
             override fun onIceGatheringChange(value: PeerConnection.IceGatheringState) {}
-            override fun onIceCandidate(value: IceCandidate) { worker.execute {
-                if (epoch != generation) return@execute
+            override fun onIceCandidate(value: IceCandidate) { dispatch {
+                if (epoch != generation) return@dispatch
                 socket?.let { send(it, "ice_candidate", JSONObject().put("candidate", value.sdp)
                     .put("mid", value.sdpMid).put("mLineIndex", value.sdpMLineIndex)) }
             } }
@@ -198,8 +218,8 @@ class WebRtcReceiver(
             override fun onRemoveStream(value: MediaStream) {}
             override fun onDataChannel(value: DataChannel) { value.close() }
             override fun onRenegotiationNeeded() {}
-            override fun onConnectionChange(value: PeerConnection.PeerConnectionState) { worker.execute {
-                if (epoch != generation) return@execute
+            override fun onConnectionChange(value: PeerConnection.PeerConnectionState) { dispatch {
+                if (epoch != generation) return@dispatch
                 when (value) {
                     PeerConnection.PeerConnectionState.CONNECTED -> {
                         if (state.stage == SignalState.Stage.OFFER) state.activate()
@@ -209,29 +229,38 @@ class WebRtcReceiver(
                     else -> Unit
                 }
             } }
-            override fun onTrack(value: RtpTransceiver) { worker.execute {
-                if (epoch != generation) return@execute
-                val track = value.receiver.track() as? VideoTrack ?: return@execute
+            override fun onTrack(value: RtpTransceiver) { dispatch {
+                if (epoch != generation) return@dispatch
+                val track = value.receiver.track() as? VideoTrack ?: return@dispatch
                 video = track
                 renderer?.let { track.addSink(it) }
             } }
         }) ?: error("Cannot create WebRTC receiver")
         decoded = 0; receivedBytes = 0; lostPackets = 0; receivedPackets = 0
         statsTime = System.currentTimeMillis()
+        renderedFrames.set(0); previousRendered = 0
     }
 
     private fun addIce(value: Triple<String, String, Int>) {
         peer?.addIceCandidate(IceCandidate(value.second, value.third, value.first))
     }
-    private fun fail(active: PeerConnection, message: String) { worker.execute { if (peer === active) end(message) } }
+    private fun fail(active: PeerConnection, message: String) { dispatch { if (peer === active) end(message) } }
 
     fun createRenderer(): SurfaceViewRenderer = SurfaceViewRenderer(context).also { view ->
-        view.init(egl.eglBaseContext, null)
+        view.init(egl.eglBaseContext, object : RendererCommon.RendererEvents {
+            override fun onFirstFrameRendered() {
+                FileLogger.log(context, "INFO", "VIDEO", "FIRST_FRAME_MS", (System.currentTimeMillis() - acceptedAt).toString())
+            }
+            override fun onFrameResolutionChanged(width: Int, height: Int, rotation: Int) {
+                FileLogger.log(context, "INFO", "VIDEO", "RESOLUTION", width.toString() + "x" + height + " rotation=" + rotation)
+            }
+        })
+        view.addFrameListener({ renderedFrames.incrementAndGet() }, 0f)
         view.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         view.setEnableHardwareScaler(true)
-        worker.execute { renderer = view; video?.addSink(view) }
+        dispatch { renderer = view; video?.addSink(view) }
     }
-    fun releaseRenderer(view: SurfaceViewRenderer) { if (!worker.isShutdown) worker.execute {
+    fun releaseRenderer(view: SurfaceViewRenderer) { if (!worker.isShutdown) dispatch {
         if (renderer === view) {
             video?.removeSink(view)
             renderer = null
@@ -241,10 +270,10 @@ class WebRtcReceiver(
 
     private fun collectStats() {
         val active = peer ?: return
-        active.getStats { report -> worker.execute {
-            if (peer !== active) return@execute
+        active.getStats { report -> dispatch {
+            if (peer !== active) return@dispatch
             val inbound = report.statsMap.values.firstOrNull { it.type == "inbound-rtp" && it.members["kind"] == "video" }
-                ?: return@execute
+                ?: return@dispatch
             fun number(name: String) = (inbound.members[name] as? Number)?.toLong() ?: 0L
             val now = System.currentTimeMillis()
             val elapsed = (now - statsTime).coerceAtLeast(1)
@@ -256,18 +285,20 @@ class WebRtcReceiver(
             val loss = ((lost - lostPackets).coerceAtLeast(0) * 100.0 / packetDelta)
             val pair = report.statsMap.values.firstOrNull { it.type == "candidate-pair" && it.members["state"] == "succeeded" }
             val rtt = ((pair?.members?.get("currentRoundTripTime") as? Number)?.toDouble() ?: 0.0) * 1000
-            val stats = JSONObject().put("fps", (frames - decoded) * 1000.0 / elapsed)
+            val rendered = renderedFrames.get()
+            val stats = JSONObject().put("fps", (rendered - previousRendered) * 1000.0 / elapsed)
                 .put("bitrate", (bytes - receivedBytes) * 8000.0 / elapsed).put("rttMs", rtt).put("lossPercent", loss)
                 .put("decoder", inbound.members["decoderImplementation"]?.toString() ?: "unknown")
             socket?.let { send(it, "stats", stats) }
             FileLogger.log(context, "INFO", "VIDEO", "STATS", stats.toString())
             decoded = frames; receivedBytes = bytes; statsTime = now; receivedPackets = received; lostPackets = lost
+            previousRendered = rendered
         } }
     }
 
     private fun send(conn: WebSocket, type: String, payload: JSONObject) {
         if (!conn.isOpen) return
-        payload.put("sessionId", session)
+        if (!payload.has("sessionId")) payload.put("sessionId", session)
         conn.send(JSONObject().put("protocolVersion", 2).put("type", type).put("requestId", UUID.randomUUID().toString())
             .put("timestamp", System.currentTimeMillis()).put("payload", payload).toString())
     }

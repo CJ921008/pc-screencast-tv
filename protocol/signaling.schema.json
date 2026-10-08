@@ -1,14 +1,386 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lanscreencast.local/protocol/signaling.schema.json",
-  "title": "LAN ScreenCast signaling envelope v1",
+  "title": "LAN ScreenCast signaling v2",
   "type": "object",
-  "required": ["type", "requestId", "timestamp", "payload"],
   "properties": {
-    "type": { "type": "string", "minLength": 1 },
-    "requestId": { "type": "string", "format": "uuid" },
-    "timestamp": { "type": "integer", "minimum": 0, "description": "Unix time in milliseconds" },
-    "payload": { "type": "object" }
+    "protocolVersion": {
+      "const": 2
+    },
+    "type": {
+      "enum": [
+        "hello",
+        "capabilities",
+        "offer",
+        "answer",
+        "ice_candidate",
+        "ping",
+        "pong",
+        "disconnect",
+        "error",
+        "stats"
+      ]
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payload": {
+      "type": "object"
+    }
   },
-  "additionalProperties": false
+  "required": [
+    "protocolVersion",
+    "type",
+    "requestId",
+    "timestamp",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "type": {
+          "const": "hello"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "computerName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "sessionId",
+            "computerName"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "capabilities"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "h264": {
+              "type": "boolean"
+            },
+            "supports1080p30": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sessionId",
+            "h264",
+            "supports1080p30"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "offer"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "sdp": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 524288
+            },
+            "video": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "enum": [
+                    1280,
+                    1920
+                  ]
+                },
+                "height": {
+                  "enum": [
+                    720,
+                    1080
+                  ]
+                },
+                "fps": {
+                  "enum": [
+                    10,
+                    15,
+                    20,
+                    30
+                  ]
+                },
+                "bitrate": {
+                  "type": "integer",
+                  "minimum": 100000,
+                  "maximum": 50000000
+                }
+              },
+              "required": [
+                "width",
+                "height",
+                "fps",
+                "bitrate"
+              ],
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "properties": {
+                    "width": {
+                      "const": 1280
+                    },
+                    "height": {
+                      "const": 720
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "width": {
+                      "const": 1920
+                    },
+                    "height": {
+                      "const": 1080
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "sessionId",
+            "sdp",
+            "video"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "answer"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "sdp": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 524288
+            }
+          },
+          "required": [
+            "sessionId",
+            "sdp"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "ice_candidate"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "candidate": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            },
+            "mid": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "mLineIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16
+            }
+          },
+          "required": [
+            "sessionId",
+            "candidate",
+            "mid",
+            "mLineIndex"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "ping"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "pong"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "disconnect"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 524288
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 524288
+            }
+          },
+          "required": [
+            "sessionId",
+            "code",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "stats"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "fps": {
+              "type": "number",
+              "minimum": 0
+            },
+            "bitrate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "rttMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "lossPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "decoder": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "fps",
+            "bitrate",
+            "rttMs",
+            "lossPercent",
+            "decoder"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
 }

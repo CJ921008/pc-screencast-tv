@@ -1,6 +1,5 @@
-# Protocol version
+# Protocol versions
 
-Current version: **1** (`protocolVersion = 1`).
-
-Both endpoints will advertise and check this version when discovery and signaling are added. Milestone 0 does not exchange messages.
-
+- WebRTC signaling: `protocolVersion = 2`, TCP WebSocket port 47475, path `/signaling`.
+- Legacy JPEG: `LSC1` magic, TCP port 47474, unchanged.
+- The original unused signaling envelope is archived as `signaling-v1.schema.json`.
