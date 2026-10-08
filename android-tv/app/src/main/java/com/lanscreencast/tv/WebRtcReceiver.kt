@@ -117,6 +117,7 @@ class WebRtcReceiver(
     }
 
     fun start() {
+        server.setReuseAddr(true)
         server.start()
         worker.scheduleAtFixedRate({
             val conn = socket ?: return@scheduleAtFixedRate
