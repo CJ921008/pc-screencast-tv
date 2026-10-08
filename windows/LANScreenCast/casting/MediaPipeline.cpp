@@ -298,6 +298,9 @@ struct H264Encoder::Impl {
         if (gpuInput) {
             ComPtr<IMFMediaBuffer> buffer;
             Check(MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), nv12.Get(), 0, FALSE, &buffer), "GPU encoder buffer");
+            ComPtr<IMF2DBuffer> surface; Check(buffer.As(&surface), "NV12 surface buffer");
+            DWORD length = 0; Check(surface->GetContiguousLength(&length), "NV12 surface length");
+            Check(buffer->SetCurrentLength(length), "NV12 current length");
             return sample(buffer, frame.time100ns);
         }
         if (!staging) {
@@ -313,7 +316,7 @@ struct H264Encoder::Impl {
         context->Unmap(staging.Get(), 0);
         return memorySample(bytes, frame.time100ns);
     }
-    bool output(std::function<void(AccessUnit)> const& emit) {
+    bool output(std::function<void(AccessUnit)> const& emit, int changes = 0) {
         MFT_OUTPUT_STREAM_INFO info{}; Check(transform->GetOutputStreamInfo(0, &info), "Encoder output buffer info");
         ComPtr<IMFSample> allocated;
         if (!(info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)) {
@@ -327,8 +330,9 @@ struct H264Encoder::Impl {
         if (data.pSample && data.pSample != allocated.Get()) encoded.Attach(data.pSample); else encoded = allocated;
         if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) return false;
         if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
+            if (changes >= 3) throw std::runtime_error("Encoder output format is unstable");
             ComPtr<IMFMediaType> type; Check(transform->GetOutputAvailableType(0, 0, &type), "Changed output type");
-            Check(transform->SetOutputType(0, type.Get(), 0), "Changed encoder output"); return true;
+            Check(transform->SetOutputType(0, type.Get(), 0), "Changed encoder output"); return output(emit, changes + 1);
         }
         Check(hr, "H264 encode output");
         if (!encoded) throw std::runtime_error("Encoder returned no sample");
