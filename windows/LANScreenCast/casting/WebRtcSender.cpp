@@ -15,6 +15,9 @@
 #include <condition_variable>
 #include <thread>
 #include <stdexcept>
+#include <sstream>
+#include <iomanip>
+#include <cmath>
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -205,11 +208,14 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                 auto elapsed = std::chrono::duration<double>(Clock::now() - statsStart).count();
                 auto cpuTime = processTime();
                 double cpu = (cpuTime-previousCpu)/10000000.0/std::max(.1,elapsed)/system.dwNumberOfProcessors*100;
-                auto text = encoderStatus() + L" · 发送 " + std::to_wstring(int(sent / std::max(.1,elapsed))) +
-                    L" FPS · 接收 " + std::to_wstring(int(payload.value("fps",0.0))) +
-                    L" FPS · " + std::to_wstring(int(bytes * 8 / std::max(.1,elapsed) / 1000000)) +
+                std::wostringstream rate,loss;
+                rate<<std::fixed<<std::setprecision(2)<<bytes*8/std::max(.1,elapsed)/1000000;
+                loss<<std::fixed<<std::setprecision(1)<<payload.value("lossPercent",0.0);
+                auto text = encoderStatus() + L" · 发送 " + std::to_wstring(std::lround(sent / std::max(.1,elapsed))) +
+                    L" FPS · 接收 " + std::to_wstring(std::lround(payload.value("fps",0.0))) +
+                    L" FPS · " + rate.str() +
                     L" Mbps · RTT " + std::to_wstring(int(payload.value("rttMs",0.0))) +
-                    L" ms · 丢包 " + std::to_wstring(int(payload.value("lossPercent",0.0))) + L"%";
+                    L" ms · 丢包 " + loss.str() + L"%";
                 onStatus(text);
                 payload["encoder"]=Utf8(encoder->Name());payload["hardware"]=encoder->Hardware();
                 payload["width"]=settings.width;payload["height"]=settings.height;payload["cpuPercent"]=cpu;
