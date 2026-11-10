@@ -1,6 +1,6 @@
 # LAN ScreenCast
 
-当前版本 **0.4.0**：Windows 主显示器 → Android 手机/Android TV，默认 H.264/WebRTC 视频，720p30，支持选择 1080p30。新版手机接收端可在 Windows 授权后操作键盘和鼠标。自动探测与采集显卡匹配的 Media Foundation 硬件编码器；不可用时降到软件 H.264/720p。JPEG 路径保留为用户主动选择的兼容模式。
+当前版本 **0.5.0**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
 
 ## 目录
 
@@ -70,7 +70,23 @@ H.264 信令地址为 `ws://IP:47475/signaling`；局域网 ICE 使用动态 UDP
 4. “输入文字”使用手机输入法，点“发送”将已输入的文字打到 Windows 当前窗口。“快捷键”可以先选 Ctrl、Shift、Alt 或 Win，再选字母、方向键、功能键等。
 5. Windows 可点“撤销键鼠控制”继续观看，或点“停止投屏”结束会话。手机退到后台或断开连接时，Windows 释放远程拖拽按键。
 
-键鼠需要两端都升级至 0.4.0，适用于可信局域网内的普通 Windows 桌面应用。Windows 输入完整性限制适用于管理员窗口、UAC 安全桌面和锁屏界面。
+局域网键鼠需要两端至少使用 0.4.0。Windows 输入完整性限制适用于管理员窗口、UAC 安全桌面和锁屏界面。
+
+### 公网 IPv6 远程接入
+
+1. 在 Windows 和手机安装 0.5.0。电脑保持开机、登录且桌面可用。在 Windows 选择 **公网 IPv6 远程接入（H.264）**，填写这台电脑网卡的公网 IPv6，点 **开始投屏**。需要操作键鼠时，在开始前勾选键鼠授权。
+2. 家庭路由器的 IPv6 入站规则和 Windows 防火墙需允许到此电脑的 **TCP 47476**（加密信令）和 **UDP 47500–47509**（视频与控制）。管理员 PowerShell 可用以下命令设置 Windows 防火墙。替换为电脑的实际地址。
+
+```powershell
+$ip = "你的电脑公网IPv6"
+New-NetFirewallRule -Name "LANScreenCastIPv6Signal" -DisplayName "LAN ScreenCast IPv6 signal" -Direction Inbound -Action Allow -Protocol TCP -LocalAddress $ip -LocalPort 47476
+New-NetFirewallRule -Name "LANScreenCastIPv6Media" -DisplayName "LAN ScreenCast IPv6 media" -Direction Inbound -Action Allow -Protocol UDP -LocalAddress $ip -LocalPort 47500-47509
+```
+
+3. Windows 点 **复制配对码**。在手机点 **连接家里电脑**，填电脑的公网 IPv6 并粘贴配对码。配对成功后可用 **连接已配对电脑**。配对码同时含证书指纹和远程访问凭据，请仅在自己控制的设备间传递。勾选 **下次启动远程接入时重置配对** 后重新启动接入，旧配对码会失效。
+4. 手机关掉 Wi-Fi，用支持 IPv6 的 4G/5G 验证视频和键鼠。已连上却看不到画面时，检查 UDP 范围以及电脑桌面是否可采集。Windows **停止投屏** 会关闭远程监听。防火墙规则可用 `Remove-NetFirewallRule -Name LANScreenCastIPv6Signal,LANScreenCastIPv6Media` 删除。
+
+远程入口使用配对时固定的 TLS 证书指纹，视频和键鼠通过 WebRTC 加密直连。家庭 IPv6 变更时需更新 Windows 监听地址、相关防火墙规则和手机保存的地址。局域网使用的 TCP 47474/47475 端口应留在局域网。
 
 Windows 窗口显示实际发送/渲染 FPS、编码器模式、码率、RTT 与丢包。软件编码降到 720p，性能由设备决定。选择“JPEG 兼容模式”时使用原有 `LSC1` 和 47474 端口，没有接受请求窗口；新模式失败会报告原因，用户可手动切换。
 

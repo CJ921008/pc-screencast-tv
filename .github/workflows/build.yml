@@ -60,6 +60,7 @@ jobs:
             .vcpkg-bincache
             .vcpkg/downloads
           key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json') }}
+          restore-keys: windows-vcpkg-
       - name: Install native media dependencies
         shell: pwsh
         run: |

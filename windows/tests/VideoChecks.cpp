@@ -8,6 +8,7 @@
 #include "../LANScreenCast/casting/MediaPipeline.h"
 #include "../LANScreenCast/casting/SignalProtocol.h"
 #include "../LANScreenCast/casting/RemoteInput.h"
+#include "../LANScreenCast/casting/RemoteAccess.h"
 #include <iostream>
 #include <atomic>
 #include <chrono>
@@ -167,9 +168,63 @@ static void checkRemoteInput() {
     input.Close();
     require(injected.size() == 6, "Closing twice produced an extra mouse release");
 }
+static void checkRemoteTls() {
+    auto identity = std::make_shared<RemoteIdentity>(RemoteIdentity::Generate());
+    auto code = identity->PairingCode();
+    require(code.starts_with("LSC1.") && code.size() == 92, "Invalid pairing code format");
+    require(!identity->Authorizes(R"({"type":"remote_auth","version":1,"token":"wrong"})"),
+        "Invalid token was accepted");
+    auto auth = nlohmann::json{{"type", "remote_auth"}, {"version", 1}, {"token", identity->token}}.dump();
+    require(!RemoteIdentity::Generate().Authorizes(auth), "Rotating pairing did not invalidate the old token");
+
+    rtc::WebSocketServerConfiguration config;
+    config.port = 0;
+    config.bindAddress = "::1";
+    config.enableTls = true;
+    config.certificatePemFile = identity->certificate;
+    config.keyPemFile = identity->privateKey;
+    rtc::WebSocketServer server(config);
+    std::shared_ptr<rtc::WebSocket> incoming;
+    server.onClient([&incoming, identity](std::shared_ptr<rtc::WebSocket> peer) {
+        incoming = peer;
+        peer->onMessage([identity, weak = std::weak_ptr(peer)](rtc::message_variant message) {
+            if (auto current = weak.lock()) {
+                if (auto text = std::get_if<std::string>(&message); text && current->path() == "/remote")
+                    current->send(std::string(identity->Authorizes(*text) ? "authorized" : "rejected"));
+            }
+        });
+    });
+    rtc::WebSocketConfiguration clientConfig;
+    // Local loopback exercises the server TLS socket. Android verifies the out-of-band certificate pin.
+    clientConfig.disableTlsVerification = true;
+    std::atomic_bool rejected{false}, authorized{false};
+    auto client = std::make_shared<rtc::WebSocket>(clientConfig);
+    client->onOpen([weak = std::weak_ptr(client), auth] {
+        if (auto active = weak.lock()) {
+            active->send(std::string(R"({"type":"remote_auth","version":1,"token":"wrong"})"));
+            active->send(auth);
+        }
+    });
+    client->onMessage([&](rtc::message_variant message) {
+        if (auto text = std::get_if<std::string>(&message)) {
+            if (*text == "rejected") rejected = true;
+            if (*text == "authorized") authorized = true;
+        }
+    });
+    client->open("wss://[::1]:" + std::to_string(server.port()) + "/remote");
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    while (!authorized && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    client->forceClose();
+    server.stop();
+    if (incoming) incoming->forceClose();
+    require(rejected && authorized, "IPv6 WSS pairing exchange failed");
+}
+
 int main() {
     try {
         checkRemoteInput();
+        checkRemoteTls();
         std::string session="14a92ef7-721c-4670-b65e-cb6791be36dd";
         nlohmann::json signal={{"protocolVersion",2},{"type","ping"},{"requestId",session},{"timestamp",0},{"payload",{{"sessionId",session}}}};
         ValidateSignal(signal,session);

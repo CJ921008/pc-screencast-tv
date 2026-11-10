@@ -7,11 +7,12 @@
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16" Width="440">
             <TextBlock Text="LAN ScreenCast" FontSize="32" FontWeight="SemiBold" />
             <TextBlock Text="Windows 桌面投屏" FontSize="22" />
-            <TextBlock Text="在接收设备上打开 LAN 投屏接收器，输入画面显示的 IP 地址。电脑与接收设备须处于同一局域网。" TextWrapping="Wrap" />
-            <TextBox x:Name="ReceiverIp" Header="接收设备 IP 地址" PlaceholderText="例如 192.168.1.25" />
-            <ComboBox x:Name="TransportMode" Header="视频模式" SelectedIndex="0">
+            <TextBlock Text="局域网投屏请输入手机显示的 IPv4。公网远程接入请输入这台电脑的公网 IPv6，并在手机上主动连接。" TextWrapping="Wrap" />
+            <TextBox x:Name="ReceiverIp" Header="局域网手机 IPv4 或本机公网 IPv6" PlaceholderText="例如 192.168.1.25 或 240e:…" />
+            <ComboBox x:Name="TransportMode" Header="连接模式" SelectedIndex="0">
                 <ComboBoxItem Content="H.264 / WebRTC" />
                 <ComboBoxItem Content="JPEG 兼容模式（720p）" />
+                <ComboBoxItem Content="公网 IPv6 远程接入（H.264）" />
             </ComboBox>
             <ComboBox x:Name="Resolution" Header="分辨率" SelectedIndex="0">
                 <ComboBoxItem Content="720p" />
@@ -28,6 +29,10 @@
                 <Button x:Name="StartButton" Content="开始投屏" Click="Start_Click" />
                 <Button x:Name="StopButton" Content="停止投屏" Click="Stop_Click" IsEnabled="False" />
                 <Button x:Name="RevokeInputButton" Content="撤销键鼠控制" Click="RevokeInput_Click" IsEnabled="False" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button x:Name="CopyPairingButton" Content="复制配对码" Click="CopyPairing_Click" IsEnabled="False" />
+                <CheckBox x:Name="ResetPairing" Content="下次启动远程接入时重置配对" />
             </StackPanel>
             <TextBlock x:Name="StatusText" Text="等待连接" TextWrapping="Wrap" />
             <TextBlock Text="当前版本传输桌面画面，暂不传输系统声音。" Opacity="0.7" TextWrapping="Wrap" />

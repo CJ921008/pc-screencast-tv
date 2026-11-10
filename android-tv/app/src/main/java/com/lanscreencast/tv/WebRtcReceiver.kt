@@ -23,6 +23,7 @@ internal class WebRtcReceiver(
     private val onRequest: (String, (Boolean) -> Unit) -> Unit,
     private val onStatus: (String, Boolean) -> Unit,
     private val onControl: (ControlView?) -> Unit,
+    private val onRemoteState: (Boolean) -> Unit,
 ) {
     companion object { const val PORT = 47475 }
     private val worker = Executors.newSingleThreadScheduledExecutor()
@@ -31,6 +32,7 @@ internal class WebRtcReceiver(
     private var video: VideoTrack? = null
     private var peer: PeerConnection? = null
     private var socket: WebSocket? = null
+    private var remoteClient: RemoteConnection? = null
     @Volatile private var control: DataChannel? = null
     @Volatile private var controlForeground = false
     private val hasTouchscreen = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
@@ -154,9 +156,54 @@ internal class WebRtcReceiver(
         }, 0, 350, TimeUnit.MILLISECONDS)
     }
 
+    fun connectRemote(device: RemoteDevice) = dispatch {
+        if (closing || remoteClient != null) return@dispatch
+        if (socket != null || !gate.acquire("webrtc")) {
+            onStatus("接收端正在使用，请先结束投屏", socket != null)
+            return@dispatch
+        }
+        try {
+            val client = RemoteConnection(device,
+                message = { source, raw -> dispatch handleMessage@{
+                    if (remoteClient !== source) return@handleMessage
+                    try { handle(source, raw) }
+                    catch (_: Exception) { end("远程信令无效") }
+                } },
+                closed = { source, error -> dispatch {
+                    if (remoteClient === source) end(error ?: "远程连接已断开")
+                } })
+            remoteClient = client
+            onRemoteState(true)
+            onStatus("正在连接家里电脑…", false)
+            client.connect()
+            worker.schedule({
+                if (remoteClient === client && socket == null) end("远程连接超时，请检查 TCP 47476")
+            }, 8, TimeUnit.SECONDS)
+        } catch (_: Exception) {
+            end("无法启动远程连接")
+        }
+    }
+
+    fun disconnectRemote() = dispatch {
+        if (remoteClient != null) {
+            socket?.let { send(it, "disconnect", JSONObject()) }
+            end("远程连接已断开")
+        }
+    }
+
     private fun handle(conn: WebSocket, raw: String) {
         require(raw.length <= 1024 * 1024)
         val message = JSONObject(raw)
+        val remote = remoteClient?.takeIf { it === conn }
+        if (remote != null && message.optString("type") == "remote_error") {
+            require(message.getInt("version") == 1)
+            end(when (message.optString("code")) {
+                "PAIRING_REQUIRED" -> "配对码无效，请重新配对"
+                "BUSY" -> "家里电脑已有远程会话"
+                else -> "电脑无法启动远程会话"
+            })
+            return
+        }
         if (message.optInt("protocolVersion") != 2) {
             send(conn, "error", JSONObject().put("code", "VERSION_MISMATCH").put("message", "需要信令版本 2"))
             conn.close(1008, "Version mismatch")
@@ -171,7 +218,7 @@ internal class WebRtcReceiver(
             val requestedSession = payload.getString("sessionId")
             UUID.fromString(requestedSession)
             val name = payload.getString("computerName").take(128)
-            if (socket != null || !gate.acquire("webrtc")) {
+            if (socket != null || (remote == null && !gate.acquire("webrtc"))) {
                 send(conn, "error", JSONObject().put("sessionId", requestedSession).put("code", "BUSY").put("message", "接收端正在使用"))
                 conn.close(1008, "Busy")
                 return
@@ -181,19 +228,15 @@ internal class WebRtcReceiver(
             state.hello()
             lastAlive = System.currentTimeMillis()
             deadline = lastAlive + 30000 // Human acceptance is separate from the media handshake.
-            onRequest(name) { allowed -> dispatch {
+            if (remote != null) {
+                remote.device.save(context)
+                accept(conn)
+            } else onRequest(name) { allowed -> dispatch {
                 if (socket !== conn || state.stage != SignalState.Stage.PENDING) return@dispatch
                 if (!allowed) {
                     send(conn, "error", JSONObject().put("code", "REJECTED").put("message", "接收端拒绝连接"))
                     end("已拒绝连接")
-                } else {
-                    state.accept()
-                    acceptedAt = System.currentTimeMillis()
-                    deadline = System.currentTimeMillis() + 10000
-                    send(conn, "capabilities", JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
-                        .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen))
-                    onStatus("正在建立视频连接", true)
-                }
+                } else accept(conn)
             } }
             return
         }
@@ -235,8 +278,18 @@ internal class WebRtcReceiver(
             "ice_candidate" -> state.candidate(payload.getString("candidate"), payload.optString("mid", "video"),
                 payload.optInt("mLineIndex", 0)).forEach { addIce(it) }
             "disconnect" -> end("投屏已停止")
+            "error" -> if (remote != null) end(payload.getString("message")) else error("Unknown signaling message")
             else -> error("Unknown signaling message")
         }
+    }
+
+    private fun accept(conn: WebSocket) {
+        state.accept()
+        acceptedAt = System.currentTimeMillis()
+        deadline = acceptedAt + 11000
+        send(conn, "capabilities", JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
+            .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen))
+        onStatus("正在建立视频连接", true)
     }
 
     private fun createPeer() {
@@ -423,13 +476,17 @@ internal class WebRtcReceiver(
         ++generation
         closeControl()
         val old = socket
+        val remote = remoteClient
         socket = null
+        remoteClient = null
         video?.let { track -> renderer?.let { track.removeSink(it) } }
         video = null
         peer?.close(); peer?.dispose(); peer = null
         state.reset()
         gate.release("webrtc")
-        old?.close()
+        if (old != null && old !== remote) old.close()
+        remote?.cancel()
+        if (remote != null) onRemoteState(false)
         onStatus(message, false)
         FileLogger.log(context, "INFO", "SIGNAL", "CLOSED", message)
     }

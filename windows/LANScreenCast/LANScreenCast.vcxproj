@@ -73,6 +73,7 @@
     <ClInclude Include="casting\WebRtcSender.h" />
     <ClInclude Include="casting\SignalProtocol.h" />
     <ClInclude Include="casting\RemoteInput.h" />
+    <ClInclude Include="casting\RemoteAccess.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -87,6 +88,8 @@
     <ClCompile Include="casting\MediaPipeline.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\WebRtcSender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteInput.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="casting\RemoteAccess.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="casting\RemoteIdentity.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>
   <ItemGroup><Midl Include="Project.idl"><SubType>Code</SubType></Midl></ItemGroup>

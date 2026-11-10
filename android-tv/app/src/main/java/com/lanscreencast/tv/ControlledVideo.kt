@@ -39,6 +39,7 @@ internal fun ControlledVideo(
     onDrag: (Boolean) -> Unit,
     onText: () -> Unit,
     onShortcuts: () -> Unit,
+    onDisconnect: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -88,13 +89,18 @@ internal fun ControlledVideo(
                 ControlButton(if (dragging) "松开" else "拖拽") { onDrag(!dragging) }
                 ControlButton("输入文字", onText)
                 ControlButton("快捷键", onShortcuts)
+                if (onDisconnect != null) ControlButton("断开", onDisconnect)
+            }
+        } else if (onDisconnect != null) {
+            Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterEnd) {
+                ControlButton("断开远程连接", onDisconnect)
             }
         }
     }
 }
 
 @Composable
-private fun ControlButton(label: String, onClick: () -> Unit) {
+internal fun ControlButton(label: String, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Box(
         Modifier.clip(RoundedCornerShape(24.dp)).background(colors.secondaryContainer)

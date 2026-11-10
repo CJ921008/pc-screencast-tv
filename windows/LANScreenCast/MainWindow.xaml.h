@@ -17,12 +17,15 @@ namespace winrt::LANScreenCast::implementation
             Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void RevokeInput_Click(winrt::Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void CopyPairing_Click(winrt::Windows::Foundation::IInspectable const& sender,
+            Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
     private:
         std::atomic_bool m_stop{ false };
         std::atomic_bool m_running{ false };
         std::shared_ptr<std::atomic_bool> m_controlPermission = std::make_shared<std::atomic_bool>(false);
         std::thread m_worker;
+        winrt::hstring m_pairingCode;
         void SetStatus(winrt::hstring const& message, bool running);
     };
 }

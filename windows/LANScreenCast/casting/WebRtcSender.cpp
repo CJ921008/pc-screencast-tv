@@ -78,6 +78,16 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     if(WSAStartup(MAKEWORD(2,2),&sockets)!=0)throw std::runtime_error("Winsock initialization failed");
     struct SocketRuntime {~SocketRuntime(){WSACleanup();}} socketRuntime;
     in_addr address{}; if (InetPtonW(AF_INET, ip.c_str(), &address) != 1) throw std::runtime_error("请输入有效的 IPv4 地址");
+    rtc::WebSocketConfiguration config; config.connectionTimeout = std::chrono::seconds(3);
+    config.maxMessageSize = 1024 * 1024;
+    auto ws = std::make_shared<rtc::WebSocket>(config);
+    StreamWebRtcSocket(ws, "ws://" + Utf8(ip) + ":47475/signaling", {}, settings, stop, controlPermission, onStatus);
+}
+
+void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string const& lanUrl,
+    std::string const& bindIPv6, VideoSettings settings, std::atomic_bool const& stop,
+    std::shared_ptr<std::atomic_bool> controlPermission,
+    std::function<void(std::wstring const&)> const& onStatus) {
     HRESULT apartment = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(apartment)) throw std::runtime_error("COM initialization failed");
     struct Runtime { ~Runtime() { MFShutdown(); CoUninitialize(); } } runtime;
@@ -87,9 +97,6 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     auto encoder = std::make_unique<H264Encoder>(capture.Device(), settings);
     settings = encoder->Settings();
     auto shared = std::make_shared<Shared>();
-    rtc::WebSocketConfiguration wsConfig; wsConfig.connectionTimeout = std::chrono::seconds(3);
-    wsConfig.maxMessageSize = 1024 * 1024;
-    auto ws = std::make_shared<rtc::WebSocket>(wsConfig);
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::Track> track;
     std::shared_ptr<rtc::DataChannel> control;
@@ -126,10 +133,11 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     });
     ws->onError([shared](std::string value) { shared->fail(value); });
     ws->onClosed([shared] { shared->fail("信令连接已断开"); });
-    ws->open("ws://" + Utf8(ip) + ":47475/signaling");
+    if (!lanUrl.empty()) ws->open(lanUrl);
     auto connectDeadline = Clock::now() + std::chrono::seconds(3);
     while (!ws->isOpen() && !stop) {
         { std::lock_guard lock(shared->mutex); if (!shared->error.empty()) throw std::runtime_error(shared->error); }
+        if (ws->isClosed()) throw std::runtime_error("信令连接已关闭");
         if (Clock::now() > connectDeadline) throw std::runtime_error("信令连接超时，请检查 IP 和端口 47475");
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -139,7 +147,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     };
     wchar_t hostname[256]{}; DWORD length = 256; GetComputerNameW(hostname, &length);
     send("hello", {{"computerName",Utf8(hostname)}});
-    onStatus(L"请在接收设备上接受连接");
+    onStatus(bindIPv6.empty() ? L"请在接收设备上接受连接" : L"配对已验证，正在建立远程会话");
     auto lastAlive = Clock::now(), lastPing = lastAlive;
     auto handshakeDeadline = lastAlive + std::chrono::seconds(30);
     bool offered = false, answered = false, started = false;
@@ -190,6 +198,11 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                 if (settings.width == 1920 && !payload.value("supports1080p30",false))
                     throw std::runtime_error("接收设备不支持 1080p30，请选择 720p");
                 rtc::Configuration config; config.disableAutoNegotiation = true; config.enableIceTcp = false;
+                if (!bindIPv6.empty()) {
+                    config.bindAddress = bindIPv6;
+                    config.portRangeBegin = RemoteMediaFirstPort;
+                    config.portRangeEnd = RemoteMediaLastPort;
+                }
                 pc = std::make_shared<rtc::PeerConnection>(config);
                 pc->onStateChange([shared,input](rtc::PeerConnection::State state) {
                     if (state == rtc::PeerConnection::State::Failed || state == rtc::PeerConnection::State::Disconnected) {
@@ -307,7 +320,12 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
         }
         if (now - lastAlive > std::chrono::seconds(6)) throw std::runtime_error("接收端心跳超时");
         if (now - lastPing >= std::chrono::seconds(2)) { send("ping"); lastPing = now; }
-        if (!started && now > handshakeDeadline) throw std::runtime_error("视频建链超时");
+        if (!started && now > handshakeDeadline) {
+            if (!bindIPv6.empty()) {
+                send("error", {{"code","MEDIA_TIMEOUT"},{"message","视频建链超时，请检查 UDP 47500–47509 入站"}});
+            }
+            throw std::runtime_error("视频建链超时");
+        }
         if (shared->trackOpen && !started) {
             started = true; statsStart = Clock::now();
             previousCpu=processTime();

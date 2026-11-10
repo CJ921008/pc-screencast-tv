@@ -3,11 +3,13 @@ project(LANScreenCastNativeChecks LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 add_executable(video-checks VideoChecks.cpp
     ../LANScreenCast/casting/MediaPipeline.cpp
-    ../LANScreenCast/casting/RemoteInput.cpp)
+    ../LANScreenCast/casting/RemoteInput.cpp
+    ../LANScreenCast/casting/RemoteIdentity.cpp)
 target_compile_options(video-checks PRIVATE /utf-8)
-target_link_libraries(video-checks PRIVATE LibDataChannel::LibDataChannel nlohmann_json::nlohmann_json ole32)
+target_link_libraries(video-checks PRIVATE LibDataChannel::LibDataChannel nlohmann_json::nlohmann_json OpenSSL::Crypto ole32)
 enable_testing()
 add_test(NAME software-encoder-and-webrtc COMMAND video-checks)
 set_tests_properties(software-encoder-and-webrtc PROPERTIES TIMEOUT 60)
