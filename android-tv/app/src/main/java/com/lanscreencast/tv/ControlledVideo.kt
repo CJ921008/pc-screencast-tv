@@ -2,6 +2,7 @@ package com.lanscreencast.tv
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,17 +12,21 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.tv.material3.Button
+import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 
 @Composable
@@ -79,11 +84,24 @@ internal fun ControlledVideo(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Button(onClick = onMode) { Text(if (direct) "直接触摸" else "触控板") }
-                Button(onClick = { onDrag(!dragging) }) { Text(if (dragging) "松开" else "拖拽") }
-                Button(onClick = onText) { Text("输入文字") }
-                Button(onClick = onShortcuts) { Text("快捷键") }
+                ControlButton(if (direct) "直接触摸" else "触控板", onMode)
+                ControlButton(if (dragging) "松开" else "拖拽") { onDrag(!dragging) }
+                ControlButton("输入文字", onText)
+                ControlButton("快捷键", onShortcuts)
             }
         }
+    }
+}
+
+@Composable
+private fun ControlButton(label: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Box(
+        Modifier.clip(RoundedCornerShape(24.dp)).background(colors.secondaryContainer)
+            .clickable(role = Role.Button, onClick = onClick)
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp).padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = colors.onSecondaryContainer)
     }
 }
