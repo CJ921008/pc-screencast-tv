@@ -286,7 +286,7 @@ internal class WebRtcReceiver(
     private fun accept(conn: WebSocket) {
         state.accept()
         acceptedAt = System.currentTimeMillis()
-        deadline = acceptedAt + 11000
+        deadline = acceptedAt + if (conn === remoteClient) 11000 else 10000
         send(conn, "capabilities", JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
             .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen))
         onStatus("正在建立视频连接", true)

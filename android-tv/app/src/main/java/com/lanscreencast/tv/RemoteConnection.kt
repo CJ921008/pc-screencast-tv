@@ -2,6 +2,7 @@ package com.lanscreencast.tv
 
 import android.app.AlertDialog
 import android.content.Context
+import android.os.Build
 import android.text.InputType
 import android.util.Base64
 import android.widget.EditText
@@ -80,7 +81,7 @@ internal class RemoteConnection(
 
     override fun onSetSSLParameters(sslParameters: SSLParameters) {
         // The copied SHA-256 pin identifies this specific computer even when its IPv6 changes.
-        sslParameters.endpointIdentificationAlgorithm = null
+        if (Build.VERSION.SDK_INT >= 24) sslParameters.endpointIdentificationAlgorithm = null
         sslParameters.protocols = sslParameters.protocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
     }
 
