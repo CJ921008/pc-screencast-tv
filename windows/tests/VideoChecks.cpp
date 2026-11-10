@@ -7,6 +7,7 @@
 #include <rtc/rtc.hpp>
 #include "../LANScreenCast/casting/MediaPipeline.h"
 #include "../LANScreenCast/casting/SignalProtocol.h"
+#include "../LANScreenCast/casting/RemoteInput.h"
 #include <iostream>
 #include <atomic>
 #include <chrono>
@@ -69,6 +70,23 @@ static void rtcLoopback(std::vector<AccessUnit> const& units) {
     auto sender=std::make_shared<rtc::PeerConnection>(config);
     auto receiver=std::make_shared<rtc::PeerConnection>(config);
     std::atomic_int received{0}; std::atomic_bool open{false};
+    std::atomic_uint keys{0};
+    auto allowed = std::make_shared<std::atomic_bool>(true);
+    auto input = std::make_shared<RemoteInput>(RECT{0,0,1920,1080}, allowed, [&](std::span<INPUT> events) {
+        if (events.size() == 2 && events[0].ki.wScan == L'中' &&
+            events[0].ki.dwFlags == KEYEVENTF_UNICODE &&
+            events[1].ki.dwFlags == (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)) ++keys;
+        return static_cast<UINT>(events.size());
+    });
+    std::shared_ptr<rtc::DataChannel> receivedControl;
+    receiver->onDataChannel([&](std::shared_ptr<rtc::DataChannel> channel) {
+        if (channel->label() != "lsc-input-v1") return;
+        receivedControl = channel;
+        channel->send(std::string(R"({"type":"resume"})"));
+        channel->send(std::string(R"({"type":"text","text":"中"})"));
+        channel->send(std::string(R"({"type":"pause"})"));
+        channel->send(std::string(R"({"type":"text","text":"中"})"));
+    });
     std::shared_ptr<rtc::Track> incoming;
     receiver->onTrack([&](std::shared_ptr<rtc::Track> track) {
         incoming=track;
@@ -94,6 +112,10 @@ static void rtcLoopback(std::vector<AccessUnit> const& units) {
     handler->addToChain(std::make_shared<rtc::RtcpSrReporter>(rtp));
     handler->addToChain(std::make_shared<rtc::RtcpNackResponder>());
     track->setMediaHandler(handler);track->onOpen([&]{open=true;});
+    auto channel = sender->createDataChannel("lsc-input-v1");
+    channel->onMessage([input](rtc::message_variant message) {
+        if (auto text = std::get_if<std::string>(&message)) input->Receive(*text);
+    });
     sender->setLocalDescription();
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
     while(!open && std::chrono::steady_clock::now()<deadline) std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -106,10 +128,48 @@ static void rtcLoopback(std::vector<AccessUnit> const& units) {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     sender->close();receiver->close();
     require(received>=50,"WebRTC H264 frames were lost in loopback");
+    require(keys == 1, "Data channel did not deliver Unicode input only while active");
     std::cout<<"WebRTC frames received: "<<received<<std::endl;
+}
+static void checkRemoteInput() {
+    auto rect = VideoContentRect(1024, 768, VideoSettings{});
+    require(rect.left == 160 && rect.top == 0 && rect.right == 1120 && rect.bottom == 720,
+        "Desktop touch layout did not exclude letterboxing");
+    auto allowed = std::make_shared<std::atomic_bool>(false);
+    std::vector<INPUT> injected;
+    RemoteInput input({0,0,1920,1080}, allowed, [&](std::span<INPUT> events) {
+        injected.insert(injected.end(), events.begin(), events.end());
+        return static_cast<UINT>(events.size());
+    });
+    auto resume = [&] { input.Receive(R"({"type":"resume"})"); };
+    auto drag = [&] { input.Receive(R"({"type":"drag","down":true,"x":5000,"y":5000})"); };
+    resume();
+    drag();
+    require(injected.empty(), "Unapproved control sent input");
+    *allowed = true;
+    drag();
+    require(injected.empty(), "Input was accepted without a foreground lease");
+    resume();
+    input.Receive(R"({"type":"click","button":"left","x":18446744073709551615,"y":5000})");
+    require(injected.empty(), "Out-of-range coordinate reached SendInput");
+    drag();
+    require(injected.size() == 2 && (injected[0].mi.dwFlags & MOUSEEVENTF_ABSOLUTE) &&
+        injected[1].mi.dwFlags == MOUSEEVENTF_LEFTDOWN, "Drag did not position before pressing");
+    input.Expire(RemoteInput::Clock::now() + std::chrono::seconds(2));
+    require(injected.size() == 3 && injected.back().mi.dwFlags == MOUSEEVENTF_LEFTUP,
+        "Foreground lease timeout did not release the mouse");
+    resume();
+    drag();
+    *allowed = false;
+    input.Expire(RemoteInput::Clock::now());
+    require(injected.size() == 6 && injected.back().mi.dwFlags == MOUSEEVENTF_LEFTUP,
+        "Permission revocation did not release the mouse");
+    input.Close();
+    require(injected.size() == 6, "Closing twice produced an extra mouse release");
 }
 int main() {
     try {
+        checkRemoteInput();
         std::string session="14a92ef7-721c-4670-b65e-cb6791be36dd";
         nlohmann::json signal={{"protocolVersion",2},{"type","ping"},{"requestId",session},{"timestamp",0},{"payload",{{"sessionId",session}}}};
         ValidateSignal(signal,session);

@@ -85,6 +85,9 @@
             },
             "supports1080p30": {
               "type": "boolean"
+            },
+            "remoteInput": {
+              "type": "boolean"
             }
           },
           "required": [

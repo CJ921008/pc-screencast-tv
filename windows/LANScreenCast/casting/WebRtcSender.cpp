@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <mfapi.h>
 #include "WebRtcSender.h"
+#include "RemoteInput.h"
 #include "SignalProtocol.h"
 #include "logging/FileLogger.h"
 #include <rtc/rtc.hpp>
@@ -71,6 +72,7 @@ struct FrameTimer {
     }
 };
 void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bool const& stop,
+    std::shared_ptr<std::atomic_bool> controlPermission,
     std::function<void(std::wstring const&)> const& onStatus) {
     WSADATA sockets{};
     if(WSAStartup(MAKEWORD(2,2),&sockets)!=0)throw std::runtime_error("Winsock initialization failed");
@@ -90,6 +92,12 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     auto ws = std::make_shared<rtc::WebSocket>(wsConfig);
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::Track> track;
+    std::shared_ptr<rtc::DataChannel> control;
+    auto input = std::make_shared<RemoteInput>(capture.Bounds(), controlPermission);
+    std::jthread controlWatchdog;
+    bool separatePointer = false;
+    auto lastView = Clock::time_point{};
+    std::string previousView;
     std::thread producer;
     std::string session = Id();
     struct Cleanup {
@@ -97,15 +105,17 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
         std::thread& producer;
         std::shared_ptr<rtc::WebSocket> ws;
         std::shared_ptr<rtc::PeerConnection>& pc;
+        std::shared_ptr<RemoteInput> input;
         std::string session;
         ~Cleanup() {
+            input->Close();
             state->done = true; state->ready.notify_all();
             if (producer.joinable()) producer.join();
             try { if (ws->isOpen()) ws->send(Message("disconnect", session, json::object()).dump()); } catch (...) {}
             if (pc) pc->close();
             ws->close();
         }
-    } cleanup{shared,producer,ws,pc,session};
+    } cleanup{shared,producer,ws,pc,input,session};
     ws->onMessage([shared](rtc::message_variant message) {
         if (auto text = std::get_if<std::string>(&message)) {
             std::lock_guard lock(shared->mutex);
@@ -181,16 +191,29 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                     throw std::runtime_error("接收设备不支持 1080p30，请选择 720p");
                 rtc::Configuration config; config.disableAutoNegotiation = true; config.enableIceTcp = false;
                 pc = std::make_shared<rtc::PeerConnection>(config);
-                pc->onStateChange([shared](rtc::PeerConnection::State state) {
-                    if (state == rtc::PeerConnection::State::Failed || state == rtc::PeerConnection::State::Disconnected)
+                pc->onStateChange([shared,input](rtc::PeerConnection::State state) {
+                    if (state == rtc::PeerConnection::State::Failed || state == rtc::PeerConnection::State::Disconnected) {
+                        input->Close();
                         shared->fail("WebRTC 视频连接已断开");
+                    }
                 });
                 pc->onLocalDescription([send,settings](rtc::Description description) {
                     send("offer", {{"sdp",std::string(description)},{"video",{{"width",settings.width},
                         {"height",settings.height},{"fps",settings.fps},{"bitrate",settings.bitrate}}}});
                 });
-                pc->onLocalCandidate([send](rtc::Candidate candidate) {
-                    send("ice_candidate",{{"candidate",std::string(candidate)},{"mid",candidate.mid()},{"mLineIndex",0}});
+                pc->onLocalCandidate([send, weak = std::weak_ptr(pc)](rtc::Candidate candidate) {
+                    int index = 0;
+                    if (auto active = weak.lock()) {
+                        if (auto description = active->localDescription()) {
+                            for (int i = 0; i < description->mediaCount(); ++i) {
+                                if (std::visit([](auto* media) { return media->mid(); }, description->media(i)) == candidate.mid()) {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    send("ice_candidate",{{"candidate",std::string(candidate)},{"mid",candidate.mid()},{"mLineIndex",index}});
                 });
                 rtc::Description::Video video("video",rtc::Description::Direction::SendOnly);
                 video.addH264Codec(102, std::string("profile-level-id=") + (settings.width == 1920 ? "42e028" : "42e01f") +
@@ -204,6 +227,20 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
                 packetizer->addToChain(std::make_shared<rtc::PliHandler>([shared] { shared->forceKey = true; }));
                 track->setMediaHandler(packetizer);
                 track->onOpen([shared] { shared->trackOpen = true; });
+                if (*controlPermission && payload.value("remoteInput", false)) {
+                    control = pc->createDataChannel("lsc-input-v1");
+                    control->onMessage([input](rtc::message_variant message) {
+                        if (auto text = std::get_if<std::string>(&message)) input->Receive(*text);
+                    });
+                    control->onClosed([input] { input->Close(); });
+                    control->onError([input](std::string) { input->Close(); });
+                    controlWatchdog = std::jthread([input](std::stop_token stopToken) {
+                        while (!stopToken.stop_requested()) {
+                            input->Expire(Clock::now());
+                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        }
+                    });
+                }
                 offered = true; handshakeDeadline = Clock::now() + std::chrono::seconds(10);
                 pc->setLocalDescription();
                 onStatus(L"正在建立 H.264 视频连接 · " + encoderStatus());
@@ -241,6 +278,33 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             } else throw std::runtime_error("Unknown receiver message");
         }
         auto now = Clock::now();
+        if (control && !*controlPermission) {
+            input->Close();
+            control->close();
+            control.reset();
+        }
+        if (started && control && control->isOpen() && control->bufferedAmount() == 0 &&
+            now - lastView >= std::chrono::milliseconds(33)) {
+            lastView = now;
+            auto bounds = capture.Bounds();
+            int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+            auto content = VideoContentRect(width, height, settings);
+            json cursor = nullptr;
+            CURSORINFO pointer{sizeof(CURSORINFO)};
+            if (separatePointer && GetCursorInfo(&pointer) && (pointer.flags & CURSOR_SHOWING) &&
+                PtInRect(&bounds, pointer.ptScreenPos)) {
+                cursor = {(pointer.ptScreenPos.x - bounds.left) * 10000 / std::max(1, width - 1),
+                    (pointer.ptScreenPos.y - bounds.top) * 10000 / std::max(1, height - 1)};
+            }
+            auto view = json{{"type","view"},{"rect",{content.left * 10000 / settings.width,
+                content.top * 10000 / settings.height, content.right * 10000 / settings.width,
+                content.bottom * 10000 / settings.height}}, {"cursor",cursor}, {"blocked",input->InputBlocked()}}.dump();
+            if (view != previousView) {
+                try { control->send(view); }
+                catch (std::exception const&) { input->Close(); control->close(); }
+                previousView = std::move(view);
+            }
+        }
         if (now - lastAlive > std::chrono::seconds(6)) throw std::runtime_error("接收端心跳超时");
         if (now - lastPing >= std::chrono::seconds(2)) { send("ping"); lastPing = now; }
         if (!started && now > handshakeDeadline) throw std::runtime_error("视频建链超时");
@@ -273,6 +337,7 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
             if (!shared->frames.empty()) { frame = std::move(shared->frames.front()); shared->frames.pop_front(); }
         }
         if (frame.texture) {
+            separatePointer = frame.separatePointer;
             auto encodeStart=Clock::now();
             bool key = shared->forceKey.exchange(false) || frame.time100ns-lastKeyTime >= 20000000;
             if (key) lastKeyTime = frame.time100ns;

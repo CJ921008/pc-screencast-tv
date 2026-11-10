@@ -62,12 +62,23 @@ std::vector<uint8_t> H264AnnexB(std::vector<uint8_t> const& input) {
     return result;
 }
 
+RECT VideoContentRect(int sourceWidth, int sourceHeight, VideoSettings settings) {
+    float scale = std::min(float(settings.width) / sourceWidth, float(settings.height) / sourceHeight);
+    LONG width = std::max(2L, static_cast<LONG>(sourceWidth * scale) & ~1L);
+    LONG height = std::max(2L, static_cast<LONG>(sourceHeight * scale) & ~1L);
+    LONG left = ((settings.width - width) / 2) & ~1L;
+    LONG top = ((settings.height - height) / 2) & ~1L;
+    return {left, top, left + width, top + height};
+}
+
 struct DesktopSource::Impl {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IDXGIOutputDuplication> duplicate;
     ComPtr<ID3D11Texture2D> latest;
     DXGI_MODE_ROTATION rotation = DXGI_MODE_ROTATION_IDENTITY;
+    RECT bounds{};
+    bool separatePointer = false;
     std::chrono::steady_clock::time_point origin = std::chrono::steady_clock::now();
     Impl() {
         ComPtr<IDXGIFactory1> factory; Check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "Create DXGI factory");
@@ -89,6 +100,7 @@ struct DesktopSource::Impl {
                 ComPtr<IDXGIOutput1> output1; Check(output.As(&output1), "Capture output");
                 Check(output1->DuplicateOutput(device.Get(), &duplicate), "Duplicate primary display");
                 rotation = d.Rotation;
+                bounds = d.DesktopCoordinates;
                 return;
             }
         }
@@ -100,6 +112,7 @@ struct DesktopSource::Impl {
         if (hr != DXGI_ERROR_WAIT_TIMEOUT) {
             Check(hr, "Display changed; restart casting");
             struct Release { IDXGIOutputDuplication* p; ~Release() { p->ReleaseFrame(); } } release{duplicate.Get()};
+            if (info.LastMouseUpdateTime.QuadPart) separatePointer = info.PointerPosition.Visible != FALSE;
             ComPtr<ID3D11Texture2D> surface; Check(resource.As(&surface), "Desktop texture");
             D3D11_TEXTURE2D_DESC d{}; surface->GetDesc(&d);
             d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_RENDER_TARGET;
@@ -109,6 +122,7 @@ struct DesktopSource::Impl {
         }
         VideoFrame frame{latest};
         frame.rotation = rotation;
+        frame.separatePointer = separatePointer;
         frame.time100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - origin).count() / 100;
         return frame;
@@ -117,6 +131,7 @@ struct DesktopSource::Impl {
 DesktopSource::DesktopSource() : impl(std::make_unique<Impl>()) {}
 DesktopSource::~DesktopSource() = default;
 ID3D11Device* DesktopSource::Device() const { return impl->device.Get(); }
+RECT DesktopSource::Bounds() const { return impl->bounds; }
 VideoFrame DesktopSource::Next(int fps) { return impl->next(fps); }
 
 struct H264Encoder::Impl {
@@ -280,9 +295,7 @@ struct H264Encoder::Impl {
         RECT src{0,0,static_cast<LONG>(source.Width),static_cast<LONG>(source.Height)};
         bool portrait = frame.rotation == DXGI_MODE_ROTATION_ROTATE90 || frame.rotation == DXGI_MODE_ROTATION_ROTATE270;
         UINT sourceWidth = portrait ? source.Height : source.Width, sourceHeight = portrait ? source.Width : source.Height;
-        float scale = std::min(float(settings.width)/sourceWidth, float(settings.height)/sourceHeight);
-        LONG width = static_cast<LONG>(sourceWidth * scale) & ~1, height = static_cast<LONG>(sourceHeight * scale) & ~1;
-        RECT dst{(settings.width-width)/2,(settings.height-height)/2,(settings.width+width)/2,(settings.height+height)/2};
+        RECT dst = VideoContentRect(sourceWidth, sourceHeight, settings);
         RECT whole{0,0,settings.width,settings.height};
         videoContext->VideoProcessorSetStreamFrameFormat(processor.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
         auto rotation = D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY;
@@ -333,9 +346,9 @@ struct H264Encoder::Impl {
         struct Unmap { ID3D11DeviceContext* c;ID3D11Texture2D* t;~Unmap(){c->Unmap(t,0);} } unmap{context.Get(),cpuStaging.Get()};
         bool portrait=frame.rotation==DXGI_MODE_ROTATION_ROTATE90 || frame.rotation==DXGI_MODE_ROTATION_ROTATE270;
         int sw=int(desc.Width),sh=int(desc.Height),logicalW=portrait?sh:sw,logicalH=portrait?sw:sh;
-        float scale=std::min(float(settings.width)/logicalW,float(settings.height)/logicalH);
-        int width=std::max(2,int(logicalW*scale)&~1),height=std::max(2,int(logicalH*scale)&~1);
-        int left=((settings.width-width)/2)&~1,top=((settings.height-height)/2)&~1;
+        RECT content = VideoContentRect(logicalW, logicalH, settings);
+        int left = content.left, top = content.top;
+        int width = content.right - left, height = content.bottom - top;
         struct RGB {int r,g,b;};
         auto pixel=[&](int x,int y)->RGB {
             if(x<left || y<top || x>=left+width || y>=top+height)return {0,0,0};

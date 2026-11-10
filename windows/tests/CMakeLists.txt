@@ -3,7 +3,9 @@ project(LANScreenCastNativeChecks LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-add_executable(video-checks VideoChecks.cpp ../LANScreenCast/casting/MediaPipeline.cpp)
+add_executable(video-checks VideoChecks.cpp
+    ../LANScreenCast/casting/MediaPipeline.cpp
+    ../LANScreenCast/casting/RemoteInput.cpp)
 target_compile_options(video-checks PRIVATE /utf-8)
 target_link_libraries(video-checks PRIVATE LibDataChannel::LibDataChannel nlohmann_json::nlohmann_json ole32)
 enable_testing()

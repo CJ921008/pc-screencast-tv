@@ -13,11 +13,12 @@ namespace winrt::LANScreenCast::implementation
     {
         InitializeComponent();
         Title(L"LAN ScreenCast");
-        Closed([this](auto const&, auto const&) { m_stop = true; });
+        Closed([this](auto const&, auto const&) { *m_controlPermission = false; m_stop = true; });
     }
 
     MainWindow::~MainWindow()
     {
+        *m_controlPermission = false;
         m_stop = true;
         if (m_worker.joinable()) m_worker.join();
     }
@@ -31,6 +32,8 @@ namespace winrt::LANScreenCast::implementation
         TransportMode().IsEnabled(!running);
         Resolution().IsEnabled(!running);
         FrameRate().IsEnabled(!running);
+        AllowRemoteInput().IsEnabled(!running);
+        RevokeInputButton().IsEnabled(running && *m_controlPermission);
     }
 
     void MainWindow::Start_Click(winrt::Windows::Foundation::IInspectable const&,
@@ -48,6 +51,8 @@ namespace winrt::LANScreenCast::implementation
         int selected = FrameRate().SelectedIndex();
         int targetFps = frameRates[selected >= 0 && selected < 4 ? selected : 2];
         bool rtcMode = TransportMode().SelectedIndex() == 0;
+        auto checked = AllowRemoteInput().IsChecked();
+        *m_controlPermission = rtcMode && checked && checked.Value();
         ::LANScreenCast::casting::VideoSettings settings;
         settings.fps = targetFps;
         if (Resolution().SelectedIndex() == 1) { settings.width = 1920; settings.height = 1080; settings.bitrate = 8000000; }
@@ -69,7 +74,7 @@ namespace winrt::LANScreenCast::implementation
                             if (auto self = weak.get()) self->StatusText().Text(text);
                         });
                     };
-                if (rtcMode) ::LANScreenCast::casting::StreamWebRtc(ip, settings, m_stop, update);
+                if (rtcMode) ::LANScreenCast::casting::StreamWebRtc(ip, settings, m_stop, m_controlPermission, update);
                 else ::LANScreenCast::casting::StreamDesktop(ip, targetFps, m_stop, update);
                 ::LANScreenCast::logging::FileLogger::Write(L"INFO", L"CAST", L"STOPPED", L"Sender stopped");
             }
@@ -78,10 +83,14 @@ namespace winrt::LANScreenCast::implementation
                 finalStatus = std::wstring(L"投屏失败：") + winrt::to_hstring(error.what()).c_str();
                 ::LANScreenCast::logging::FileLogger::Write(L"ERROR", L"CAST", L"FAILED", finalStatus);
             }
+            *m_controlPermission = false;
             m_running = false;
             dispatcher.TryEnqueue([weak, text = winrt::hstring(finalStatus)]()
             {
-                if (auto self = weak.get()) self->SetStatus(text, false);
+                if (auto self = weak.get()) {
+                    self->AllowRemoteInput().IsChecked(winrt::box_value(false).as<winrt::Windows::Foundation::IReference<bool>>());
+                    self->SetStatus(text, false);
+                }
             });
         });
     }
@@ -89,7 +98,16 @@ namespace winrt::LANScreenCast::implementation
     void MainWindow::Stop_Click(winrt::Windows::Foundation::IInspectable const&,
         Microsoft::UI::Xaml::RoutedEventArgs const&)
     {
+        *m_controlPermission = false;
         m_stop = true;
         SetStatus(L"正在停止…", true);
+    }
+
+    void MainWindow::RevokeInput_Click(winrt::Windows::Foundation::IInspectable const&,
+        Microsoft::UI::Xaml::RoutedEventArgs const&)
+    {
+        *m_controlPermission = false;
+        AllowRemoteInput().IsChecked(winrt::box_value(false).as<winrt::Windows::Foundation::IReference<bool>>());
+        RevokeInputButton().IsEnabled(false);
     }
 }

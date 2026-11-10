@@ -13,10 +13,6 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -24,7 +20,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -36,11 +31,15 @@ import kotlin.math.min
 class MainActivity : ComponentActivity() {
     private var casting by mutableStateOf(false)
     private var rtcCasting by mutableStateOf(false)
+    private var control by mutableStateOf<ControlView?>(null)
+    private var direct by mutableStateOf(false)
+    private var dragging by mutableStateOf(false)
     private var status by mutableStateOf("等待连接")
     private lateinit var receiver: ScreenReceiver
     private lateinit var rtcReceiver: WebRtcReceiver
     private val gate = SessionGate()
     private var requestDialog: AlertDialog? = null
+    private var keyboardDialog: AlertDialog? = null
     @Volatile private var surfaceView: SurfaceView? = null
     private val framePaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private var sampleStart = SystemClock.elapsedRealtime()
@@ -63,6 +62,14 @@ class MainActivity : ComponentActivity() {
                 status = value; rtcCasting = active
                 if (!active) requestDialog?.dismiss()
                 showFullscreen(active)
+            } },
+            onControl = { value -> runOnUiThread {
+                control = value
+                if (value == null) {
+                    direct = false
+                    dragging = false
+                    keyboardDialog?.dismiss()
+                }
             } })
         rtcReceiver.start()
         receiver = ScreenReceiver(
@@ -81,10 +88,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 if (rtcCasting) {
-                    Box(Modifier.fillMaxSize().background(ComposeColor.Black), contentAlignment = Alignment.Center) {
-                    AndroidView(factory = { rtcReceiver.createRenderer() },
-                        onRelease = { rtcReceiver.releaseRenderer(it) }, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-                    }
+                    ControlledVideo(rtcReceiver, control, direct, dragging,
+                        onMode = { dragging = false; direct = !direct },
+                        onDrag = { dragging = it },
+                        onText = {
+                            keyboardDialog = textInputDialog(this) { rtcReceiver.sendControl(it) }.also { it.show() }
+                        },
+                        onShortcuts = {
+                            keyboardDialog = shortcutDialog(this) { rtcReceiver.sendControl(it) }.also { it.show() }
+                        },
+                    )
                 } else if (casting) {
                     AndroidView(
                         factory = { context -> SurfaceView(context).also { surfaceView = it } },
@@ -152,8 +165,21 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         receiver.stop()
         requestDialog?.dismiss()
+        keyboardDialog?.dismiss()
         rtcReceiver.close()
         surfaceView = null
         super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        rtcReceiver.setControlForeground(true)
+    }
+
+    override fun onPause() {
+        rtcReceiver.setControlForeground(false)
+        dragging = false
+        keyboardDialog?.dismiss()
+        super.onPause()
     }
 }

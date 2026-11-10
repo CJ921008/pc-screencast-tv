@@ -1,6 +1,7 @@
 package com.lanscreencast.tv
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaCodecList
 import com.lanscreencast.tv.logging.FileLogger
 import org.java_websocket.WebSocket
@@ -9,17 +10,19 @@ import org.java_websocket.server.WebSocketServer
 import org.json.JSONObject
 import org.webrtc.*
 import java.net.InetSocketAddress
+import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
-class WebRtcReceiver(
+internal class WebRtcReceiver(
     private val context: Context,
     private val gate: SessionGate,
     private val onRequest: (String, (Boolean) -> Unit) -> Unit,
     private val onStatus: (String, Boolean) -> Unit,
+    private val onControl: (ControlView?) -> Unit,
 ) {
     companion object { const val PORT = 47475 }
     private val worker = Executors.newSingleThreadScheduledExecutor()
@@ -28,6 +31,9 @@ class WebRtcReceiver(
     private var video: VideoTrack? = null
     private var peer: PeerConnection? = null
     private var socket: WebSocket? = null
+    @Volatile private var control: DataChannel? = null
+    @Volatile private var controlForeground = false
+    private val hasTouchscreen = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
     private var session = ""
     private val state = SignalState()
     private var lastAlive = 0L
@@ -143,6 +149,9 @@ class WebRtcReceiver(
             send(conn, "ping", JSONObject())
             collectStats()
         }, 2, 2, TimeUnit.SECONDS)
+        worker.scheduleWithFixedDelay({
+            if (controlForeground) control?.let { writeControl(it, "{\"type\":\"resume\"}") }
+        }, 0, 350, TimeUnit.MILLISECONDS)
     }
 
     private fun handle(conn: WebSocket, raw: String) {
@@ -182,7 +191,7 @@ class WebRtcReceiver(
                     acceptedAt = System.currentTimeMillis()
                     deadline = System.currentTimeMillis() + 10000
                     send(conn, "capabilities", JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
-                        .put("supports1080p30", supports1080))
+                        .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen))
                     onStatus("正在建立视频连接", true)
                 }
             } }
@@ -248,7 +257,13 @@ class WebRtcReceiver(
             override fun onIceCandidatesRemoved(value: Array<out IceCandidate>) {}
             override fun onAddStream(value: MediaStream) {}
             override fun onRemoveStream(value: MediaStream) {}
-            override fun onDataChannel(value: DataChannel) { value.close() }
+            override fun onDataChannel(value: DataChannel) { dispatch {
+                if (epoch == generation && hasTouchscreen && control == null && value.label() == "lsc-input-v1") {
+                    attachControl(value)
+                } else {
+                    value.dispose()
+                }
+            } }
             override fun onRenegotiationNeeded() {}
             override fun onConnectionChange(value: PeerConnection.PeerConnectionState) { dispatch {
                 if (epoch != generation) return@dispatch
@@ -276,6 +291,62 @@ class WebRtcReceiver(
 
     private fun addIce(value: Triple<String, String, Int>) {
         peer?.addIceCandidate(IceCandidate(value.second, value.third, value.first))
+    }
+
+    private fun attachControl(channel: DataChannel) {
+        control = channel
+        channel.registerObserver(object : DataChannel.Observer {
+            override fun onBufferedAmountChange(previousAmount: Long) {}
+            override fun onStateChange() { dispatch {
+                if (control !== channel) return@dispatch
+                when (channel.state()) {
+                    DataChannel.State.OPEN -> if (controlForeground) writeControl(channel, "{\"type\":\"resume\"}") else Unit
+                    DataChannel.State.CLOSED, DataChannel.State.CLOSING -> closeControl()
+                    else -> Unit
+                }
+            } }
+            override fun onMessage(buffer: DataChannel.Buffer) {
+                if (buffer.binary || buffer.data.remaining() > 512) return
+                val bytes = ByteArray(buffer.data.remaining()).also { buffer.data.get(it) }
+                dispatch {
+                    if (control === channel) ControlView.parse(bytes.decodeToString())?.let(onControl)
+                }
+            }
+        })
+    }
+
+    fun setControlForeground(active: Boolean) {
+        controlForeground = active
+        val channel = control ?: return
+        dispatch {
+            if (control === channel) writeControl(channel, if (active) "{\"type\":\"resume\"}" else "{\"type\":\"pause\"}")
+        }
+    }
+
+    fun sendControl(message: JSONObject, transient: Boolean = false) {
+        val channel = control ?: return
+        dispatch {
+            if (controlForeground && control === channel) writeControl(channel, message.toString(), transient)
+        }
+    }
+
+    private fun writeControl(channel: DataChannel, message: String, transient: Boolean = false) {
+        if (channel.state() != DataChannel.State.OPEN) return
+        val buffered = channel.bufferedAmount()
+        if (transient && buffered >= 8192) return
+        if (buffered >= 65536 ||
+            !channel.send(DataChannel.Buffer(ByteBuffer.wrap(message.encodeToByteArray()), false))) {
+            closeControl()
+        }
+    }
+
+    private fun closeControl() {
+        val old = control ?: return
+        control = null
+        old.unregisterObserver()
+        old.close()
+        old.dispose()
+        onControl(null)
     }
     private fun fail(active: PeerConnection, message: String) { dispatch { if (peer === active) end(message) } }
 
@@ -350,6 +421,7 @@ class WebRtcReceiver(
     }
     private fun end(message: String) {
         ++generation
+        closeControl()
         val old = socket
         socket = null
         video?.let { track -> renderer?.let { track.removeSink(it) } }

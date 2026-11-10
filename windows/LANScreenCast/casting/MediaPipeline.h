@@ -13,6 +13,7 @@ namespace LANScreenCast::casting {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         int64_t time100ns = 0;
         DXGI_MODE_ROTATION rotation = DXGI_MODE_ROTATION_IDENTITY;
+        bool separatePointer = false;
     };
     struct AccessUnit { std::vector<uint8_t> bytes; int64_t time100ns; bool keyframe; };
     class DesktopSource {
@@ -22,6 +23,7 @@ namespace LANScreenCast::casting {
         DesktopSource();
         ~DesktopSource();
         ID3D11Device* Device() const;
+        RECT Bounds() const;
         VideoFrame Next(int fps);
     };
     class H264Encoder {
@@ -41,4 +43,5 @@ namespace LANScreenCast::casting {
         void Drain(std::function<void(AccessUnit)> const& emit);
     };
     std::vector<uint8_t> H264AnnexB(std::vector<uint8_t> const& input);
+    RECT VideoContentRect(int sourceWidth, int sourceHeight, VideoSettings settings);
 }

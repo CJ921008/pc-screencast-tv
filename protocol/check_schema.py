@@ -19,6 +19,8 @@ samples = {
 }
 for kind, payload in samples.items():
     validator.validate(dict(base, type=kind, payload=dict(sessionId=session, **payload)))
+validator.validate(dict(base, type="capabilities",
+    payload=dict(sessionId=session, remoteInput=True, **samples["capabilities"])))
 bad = dict(base, type="offer", payload=dict(sessionId=session, **samples["offer"]))
 bad["payload"]["video"]["height"] = 720
 assert list(validator.iter_errors(bad))

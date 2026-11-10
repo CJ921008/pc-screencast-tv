@@ -23,9 +23,11 @@
                 <ComboBoxItem Content="20 FPS" />
                 <ComboBoxItem Content="30 FPS" />
             </ComboBox>
+            <CheckBox x:Name="AllowRemoteInput" Content="允许接收手机控制键盘和鼠标（H.264）" />
             <StackPanel Orientation="Horizontal" Spacing="12">
                 <Button x:Name="StartButton" Content="开始投屏" Click="Start_Click" />
                 <Button x:Name="StopButton" Content="停止投屏" Click="Stop_Click" IsEnabled="False" />
+                <Button x:Name="RevokeInputButton" Content="撤销键鼠控制" Click="RevokeInput_Click" IsEnabled="False" />
             </StackPanel>
             <TextBlock x:Name="StatusText" Text="等待连接" TextWrapping="Wrap" />
             <TextBlock Text="当前版本传输桌面画面，暂不传输系统声音。" Opacity="0.7" TextWrapping="Wrap" />
