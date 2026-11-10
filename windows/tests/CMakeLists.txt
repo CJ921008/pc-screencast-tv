@@ -9,7 +9,7 @@ add_executable(video-checks VideoChecks.cpp
     ../LANScreenCast/casting/RemoteInput.cpp
     ../LANScreenCast/casting/RemoteIdentity.cpp)
 target_compile_options(video-checks PRIVATE /utf-8)
-target_link_libraries(video-checks PRIVATE LibDataChannel::LibDataChannel nlohmann_json::nlohmann_json OpenSSL::Crypto ole32)
+target_link_libraries(video-checks PRIVATE LibDataChannel::LibDataChannel nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto ole32 ws2_32)
 enable_testing()
 add_test(NAME software-encoder-and-webrtc COMMAND video-checks)
 set_tests_properties(software-encoder-and-webrtc PROPERTIES TIMEOUT 60)

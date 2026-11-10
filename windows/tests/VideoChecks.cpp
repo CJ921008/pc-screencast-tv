@@ -1,10 +1,14 @@
 #define NOMINMAX
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mftransform.h>
 #include <mferror.h>
 #include <rtc/rtc.hpp>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
 #include "../LANScreenCast/casting/MediaPipeline.h"
 #include "../LANScreenCast/casting/SignalProtocol.h"
 #include "../LANScreenCast/casting/RemoteInput.h"
@@ -66,8 +70,13 @@ static int decode(std::vector<AccessUnit> const& units) {
     decoder->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN,0);read();
     return frames;
 }
-static void rtcLoopback(std::vector<AccessUnit> const& units) {
+static void rtcLoopback(std::vector<AccessUnit> const& units, bool ipv6 = false) {
     rtc::Configuration config; config.disableAutoNegotiation=true;
+    if (ipv6) {
+        config.bindAddress = "::1";
+        config.portRangeBegin = RemoteMediaFirstPort;
+        config.portRangeEnd = RemoteMediaLastPort;
+    }
     auto sender=std::make_shared<rtc::PeerConnection>(config);
     auto receiver=std::make_shared<rtc::PeerConnection>(config);
     std::atomic_int received{0}; std::atomic_bool open{false};
@@ -130,7 +139,7 @@ static void rtcLoopback(std::vector<AccessUnit> const& units) {
     sender->close();receiver->close();
     require(received>=50,"WebRTC H264 frames were lost in loopback");
     require(keys == 1, "Data channel did not deliver Unicode input only while active");
-    std::cout<<"WebRTC frames received: "<<received<<std::endl;
+    std::cout<<(ipv6 ? "IPv6 " : "")<<"WebRTC frames received: "<<received<<std::endl;
 }
 static void checkRemoteInput() {
     auto rect = VideoContentRect(1024, 768, VideoSettings{});
@@ -169,6 +178,9 @@ static void checkRemoteInput() {
     require(injected.size() == 6, "Closing twice produced an extra mouse release");
 }
 static void checkRemoteTls() {
+    WSADATA data{};
+    require(WSAStartup(MAKEWORD(2, 2), &data) == 0, "Cannot initialize sockets");
+    struct Winsock { ~Winsock() { WSACleanup(); } } winsock;
     auto identity = std::make_shared<RemoteIdentity>(RemoteIdentity::Generate());
     auto code = identity->PairingCode();
     require(code.starts_with("LSC1.") && code.size() == 92, "Invalid pairing code format");
@@ -194,31 +206,63 @@ static void checkRemoteTls() {
             }
         });
     });
-    rtc::WebSocketConfiguration clientConfig;
-    // Local loopback exercises the server TLS socket. Android verifies the out-of-band certificate pin.
-    clientConfig.disableTlsVerification = true;
-    std::atomic_bool rejected{false}, authorized{false};
-    auto client = std::make_shared<rtc::WebSocket>(clientConfig);
-    client->onOpen([weak = std::weak_ptr(client), auth] {
-        if (auto active = weak.lock()) {
-            active->send(std::string(R"({"type":"remote_auth","version":1,"token":"wrong"})"));
-            active->send(auth);
+    // Use a literal AF_INET6 socket. The upstream C++ WebSocket client URL parser
+    // does not handle bracketed IPv6 literals in this version.
+    struct ClientSocket { SOCKET value; ~ClientSocket() { if (value != INVALID_SOCKET) closesocket(value); } };
+    ClientSocket client{socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP)};
+    require(client.value != INVALID_SOCKET, "Cannot create IPv6 test socket");
+    sockaddr_in6 address{};
+    address.sin6_family = AF_INET6;
+    address.sin6_port = htons(server.port());
+    address.sin6_addr.u.Byte[15] = 1;
+    require(connect(client.value, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0,
+        "Cannot connect to the IPv6 WSS listener");
+    DWORD timeout = 4000;
+    require(setsockopt(client.value, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&timeout), sizeof(timeout)) == 0,
+        "Cannot set test socket timeout");
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context(SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
+    require(bool(context), "Cannot create TLS test context");
+    std::unique_ptr<SSL, decltype(&SSL_free)> tls(SSL_new(context.get()), SSL_free);
+    require(tls && SSL_set_fd(tls.get(), static_cast<int>(client.value)) == 1 && SSL_connect(tls.get()) == 1,
+        "Cannot negotiate TLS over IPv6");
+    std::unique_ptr<X509, decltype(&X509_free)> actual(SSL_get1_peer_certificate(tls.get()), X509_free);
+    std::unique_ptr<BIO, decltype(&BIO_free)> pem(BIO_new_mem_buf(identity->certificate.data(),
+        static_cast<int>(identity->certificate.size())), BIO_free);
+    std::unique_ptr<X509, decltype(&X509_free)> expected(PEM_read_bio_X509(pem.get(), nullptr, nullptr, nullptr), X509_free);
+    require(actual && expected && X509_cmp(actual.get(), expected.get()) == 0,
+        "WSS listener did not present the paired certificate");
+    auto write = [&](std::string const& bytes) {
+        require(SSL_write(tls.get(), bytes.data(), static_cast<int>(bytes.size())) == static_cast<int>(bytes.size()),
+            "Could not write to WSS listener");
+    };
+    auto read = [&](std::string_view marker) {
+        std::string bytes;
+        while (bytes.find(marker) == std::string::npos && bytes.size() < 8192) {
+            char buffer[1024];
+            int size = SSL_read(tls.get(), buffer, sizeof(buffer));
+            require(size > 0, "WSS response timed out");
+            bytes.append(buffer, size);
         }
-    });
-    client->onMessage([&](rtc::message_variant message) {
-        if (auto text = std::get_if<std::string>(&message)) {
-            if (*text == "rejected") rejected = true;
-            if (*text == "authorized") authorized = true;
-        }
-    });
-    client->open("wss://[::1]:" + std::to_string(server.port()) + "/remote");
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
-    while (!authorized && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    client->forceClose();
+        require(bytes.find(marker) != std::string::npos, "Unexpected WSS response");
+    };
+    write("GET /remote HTTP/1.1\r\nHost: [::1]\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    read("101 Switching Protocols");
+    auto sendFrame = [&](std::string const& text) {
+        require(text.size() < 126, "Oversized WSS test message");
+        constexpr char mask[] = {1, 2, 3, 4};
+        std::string frame{char(0x81), char(0x80 | text.size())};
+        frame.append(mask, sizeof(mask));
+        for (size_t i = 0; i < text.size(); ++i) frame.push_back(text[i] ^ mask[i % 4]);
+        write(frame);
+    };
+    sendFrame(R"({"type":"remote_auth","version":1,"token":"wrong"})");
+    read("rejected");
+    sendFrame(auth);
+    read("authorized");
     server.stop();
     if (incoming) incoming->forceClose();
-    require(rejected && authorized, "IPv6 WSS pairing exchange failed");
+    std::cout << "IPv6 WSS certificate and token verified" << std::endl;
 }
 
 int main() {
@@ -275,6 +319,8 @@ int main() {
             std::cout<<"BGRA conversion frames: "<<converted<<std::endl;
         }
         std::cout<<"Software H264 encoded/decoded: "<<units.size()<<"/"<<decoded<<std::endl;
-        rtcLoopback(units);MFShutdown();CoUninitialize();return 0;
+        rtcLoopback(units);
+        rtcLoopback(units, true);
+        MFShutdown();CoUninitialize();return 0;
     } catch(std::exception const& error) {std::cerr<<error.what()<<std::endl;return 1;}
 }
