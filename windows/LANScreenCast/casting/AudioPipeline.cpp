@@ -1,5 +1,5 @@
 #include "AudioPipeline.h"
-#include <opus.h>
+#include <opus/opus.h>
 #include <array>
 #include <algorithm>
 #include <cmath>

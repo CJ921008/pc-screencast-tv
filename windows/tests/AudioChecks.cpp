@@ -1,6 +1,6 @@
 #include "../LANScreenCast/casting/AudioPipeline.h"
 #include "../LANScreenCast/casting/MediaClock.h"
-#include <opus.h>
+#include <opus/opus.h>
 #include <rtc/rtc.hpp>
 #include <algorithm>
 #include <array>
