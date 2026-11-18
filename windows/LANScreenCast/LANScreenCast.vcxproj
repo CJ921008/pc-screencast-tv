@@ -70,6 +70,8 @@
     <ClInclude Include="logging\FileLogger.h" />
     <ClInclude Include="casting\ScreenSender.h" />
     <ClInclude Include="casting\MediaPipeline.h" />
+    <ClInclude Include="casting\AudioPipeline.h" />
+    <ClInclude Include="casting\MediaClock.h" />
     <ClInclude Include="casting\WebRtcSender.h" />
     <ClInclude Include="casting\SignalProtocol.h" />
     <ClInclude Include="casting\RemoteInput.h" />
@@ -86,6 +88,7 @@
     <ClCompile Include="logging\FileLogger.cpp" />
     <ClCompile Include="casting\ScreenSender.cpp" />
     <ClCompile Include="casting\MediaPipeline.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="casting\AudioPipeline.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\WebRtcSender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteInput.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteAccess.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>

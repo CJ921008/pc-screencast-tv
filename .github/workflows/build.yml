@@ -76,7 +76,7 @@ jobs:
       - name: Build Release MSIX
         shell: pwsh
         run: msbuild windows/LANScreenCast.sln /restore /m /p:Configuration=Release /p:Platform=x64 /p:GenerateAppxPackageOnBuild=true /p:AppxPackageSigningEnabled=false /p:AppxBundle=Never
-      - name: Test software H264 and WebRTC loopback
+      - name: Test H264, Opus and WebRTC loopback
         shell: pwsh
         run: |
           Install-WindowsFeature Server-Media-Foundation

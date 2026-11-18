@@ -21,9 +21,13 @@ for kind, payload in samples.items():
     validator.validate(dict(base, type=kind, payload=dict(sessionId=session, **payload)))
 validator.validate(dict(base, type="capabilities",
     payload=dict(sessionId=session, remoteInput=True, **samples["capabilities"])))
+validator.validate(dict(base, type="capabilities",
+    payload=dict(sessionId=session, opus=True, **samples["capabilities"])))
+assert list(validator.iter_errors(dict(base, type="capabilities",
+    payload=dict(sessionId=session, opus="true", **samples["capabilities"]))))
 bad = dict(base, type="offer", payload=dict(sessionId=session, **samples["offer"]))
 bad["payload"]["video"]["height"] = 720
 assert list(validator.iter_errors(bad))
 assert list(validator.iter_errors(dict(base, protocolVersion=1, type="ping", payload=dict(sessionId=session))))
 assert list(validator.iter_errors(dict(base, type="unknown", payload=dict(sessionId=session))))
-print("10 signaling messages and invalid version/resolution/type verified")
+print("10 signaling messages, optional Opus capability and invalid version/resolution/type verified")

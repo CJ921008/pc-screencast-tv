@@ -9,6 +9,7 @@ import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import org.json.JSONObject
 import org.webrtc.*
+import org.webrtc.audio.JavaAudioDeviceModule
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.UUID
@@ -24,6 +25,7 @@ internal class WebRtcReceiver(
     private val onStatus: (String, Boolean) -> Unit,
     private val onControl: (ControlView?) -> Unit,
     private val onRemoteState: (Boolean) -> Unit,
+    private val onAudioState: (AudioPlaybackState?) -> Unit,
 ) {
     companion object { const val PORT = 47475 }
     private val worker = Executors.newSingleThreadScheduledExecutor()
@@ -64,6 +66,9 @@ internal class WebRtcReceiver(
     @Volatile private var closing = false
     private val lifecycle = Any()
     private var starter: Thread? = null
+    private val audioPlayback = ReceiverAudio(context, ::dispatch, onAudioState)
+    private val audioDeviceModule: JavaAudioDeviceModule
+    private val supportsOpus: Boolean
 
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
@@ -98,7 +103,20 @@ internal class WebRtcReceiver(
                     else hardware ?: software
             }
         }
-        factory = PeerConnectionFactory.builder().setVideoDecoderFactory(decoderFactory).createPeerConnectionFactory()
+        audioDeviceModule = JavaAudioDeviceModule.builder(context)
+            .setAudioAttributes(audioPlayback.attributes)
+            .setUseStereoOutput(true)
+            .createAudioDeviceModule().apply {
+                setAudioRecordEnabled(false)
+                setMicrophoneMute(true)
+            }
+        factory = PeerConnectionFactory.builder().setVideoDecoderFactory(decoderFactory)
+            .setAudioDeviceModule(audioDeviceModule).createPeerConnectionFactory()
+        supportsOpus = runCatching {
+            factory.getRtpReceiverCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO).codecs.any {
+                it.name.equals("opus", true) && it.clockRate == 48000 && it.numChannels == 2
+            }
+        }.getOrDefault(false)
         server = object : WebSocketServer(InetSocketAddress(PORT)) {
             override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
                 if (handshake.resourceDescriptor != "/signaling") conn.close(1008, "Invalid path")
@@ -287,8 +305,10 @@ internal class WebRtcReceiver(
         state.accept()
         acceptedAt = System.currentTimeMillis()
         deadline = acceptedAt + if (conn === remoteClient) 11000 else 10000
-        send(conn, "capabilities", JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
-            .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen))
+        val capabilities = JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
+            .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen)
+        if (supportsOpus) capabilities.put("opus", true)
+        send(conn, "capabilities", capabilities)
         onStatus("正在建立视频连接", true)
     }
 
@@ -331,11 +351,20 @@ internal class WebRtcReceiver(
             } }
             override fun onTrack(value: RtpTransceiver) { dispatch {
                 if (epoch != generation) return@dispatch
-                val track = value.receiver.track() as? VideoTrack ?: return@dispatch
-                video = track
-                renderer?.let { track.addSink(it) }
+                when (val track = value.receiver.track()) {
+                    is VideoTrack -> {
+                        video = track
+                        renderer?.let { track.addSink(it) }
+                    }
+                    is AudioTrack -> {
+                        peer?.let { audioPlayback.attach(it, track) }
+                        FileLogger.log(context, "INFO", "AUDIO", "TRACK", "Remote audio received")
+                    }
+                }
             } }
         }) ?: error("Cannot create WebRTC receiver")
+        peer?.setAudioRecording(false)
+        peer?.setAudioPlayout(false)
         decoded = 0; receivedBytes = 0; lostPackets = 0; receivedPackets = 0
         statsTime = System.currentTimeMillis()
         renderedFrames.set(0); previousRendered = 0
@@ -375,6 +404,10 @@ internal class WebRtcReceiver(
             if (control === channel) writeControl(channel, if (active) "{\"type\":\"resume\"}" else "{\"type\":\"pause\"}")
         }
     }
+
+    fun setAudioForeground(active: Boolean) = dispatch { audioPlayback.setForeground(active) }
+
+    fun setAudioMuted(muted: Boolean) = dispatch { audioPlayback.setMuted(muted) }
 
     fun sendControl(message: JSONObject, transient: Boolean = false) {
         val channel = control ?: return
@@ -475,6 +508,7 @@ internal class WebRtcReceiver(
     private fun end(message: String) {
         ++generation
         closeControl()
+        audioPlayback.clear()
         val old = socket
         val remote = remoteClient
         socket = null
@@ -497,6 +531,7 @@ internal class WebRtcReceiver(
         worker.submit { end("接收端已停止"); renderer?.release(); renderer = null }.get(2, TimeUnit.SECONDS)
         worker.shutdownNow()
         factory.dispose()
+        audioDeviceModule.release()
         egl.release()
     }
 }

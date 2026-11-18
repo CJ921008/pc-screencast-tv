@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.SurfaceView
@@ -39,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private var dragging by mutableStateOf(false)
     private var remoteActive by mutableStateOf(false)
     private var remoteDevice by mutableStateOf<RemoteDevice?>(null)
+    private var audioState by mutableStateOf<AudioPlaybackState?>(null)
     private var status by mutableStateOf("等待连接")
     private lateinit var receiver: ScreenReceiver
     private lateinit var rtcReceiver: WebRtcReceiver
@@ -54,6 +56,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         remoteDevice = RemoteDevice.load(this)
+        volumeControlStream = AudioManager.STREAM_MUSIC
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         FileLogger.log(this, "INFO", "APP", "STARTED", "Receiver waiting for connection")
         rtcReceiver = WebRtcReceiver(this, gate,
@@ -81,7 +84,9 @@ class MainActivity : ComponentActivity() {
             onRemoteState = { active -> runOnUiThread {
                 remoteActive = active
                 if (!active) remoteDevice = RemoteDevice.load(this)
-            } })
+            } },
+            onAudioState = { value -> runOnUiThread { audioState = value } },
+        )
         rtcReceiver.start()
         receiver = ScreenReceiver(
             this,
@@ -110,6 +115,11 @@ class MainActivity : ComponentActivity() {
                             keyboardDialog = shortcutDialog(this) { rtcReceiver.sendControl(it) }.also { it.show() }
                         },
                         onDisconnect = if (remoteActive) rtcReceiver::disconnectRemote else null,
+                        audioState = audioState,
+                        onAudioToggle = {
+                            val current = audioState
+                            rtcReceiver.setAudioMuted(current != null && !current.muted && !current.interrupted)
+                        },
                     )
                 } else if (casting) {
                     AndroidView(
@@ -200,10 +210,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         rtcReceiver.setControlForeground(true)
+        rtcReceiver.setAudioForeground(true)
     }
 
     override fun onPause() {
         rtcReceiver.setControlForeground(false)
+        rtcReceiver.setAudioForeground(false)
         dragging = false
         keyboardDialog?.dismiss()
         super.onPause()

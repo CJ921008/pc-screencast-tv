@@ -5,6 +5,7 @@ The Windows build uses vcpkg baseline 2750401336fb7c95f6619657a46a7e798661341c a
 | Component | Version | License / source |
 |---|---|---|
 | libdatachannel | 0.24.5 | MPL-2.0, https://github.com/paullouisageneau/libdatachannel/tree/v0.24.5 |
+| libopus | vcpkg baseline | BSD-3-Clause, https://opus-codec.org/license/ |
 | libjuice, libsrtp, usrsctp, OpenSSL, plog, nlohmann-json | vcpkg baseline | Each package's upstream license is included under licenses in the Windows CI artifact |
 | WebRTC Android SDK | 144.7559.15 | WebRTC BSD-style license and bundled third-party licenses, https://github.com/webrtc-sdk/android/releases/tag/v144.7559.15 |
 | Java-WebSocket | 1.6.0 | MIT, https://github.com/TooTallNate/Java-WebSocket/tree/v1.6.0 |

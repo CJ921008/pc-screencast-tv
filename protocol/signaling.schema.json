@@ -88,6 +88,9 @@
             },
             "remoteInput": {
               "type": "boolean"
+            },
+            "opus": {
+              "type": "boolean"
             }
           },
           "required": [

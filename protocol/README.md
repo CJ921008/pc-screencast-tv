@@ -4,11 +4,15 @@ WebRTC uses WebSocket TCP port **47475**, path **/signaling**. JPEG compatibilit
 
 Each JSON message carries protocolVersion=2, type, UUID requestId, Unix-millisecond timestamp, and payload. All payloads carry a sessionId; errors before a valid session may use an empty ID. See signaling.schema.json for message payload constraints.
 
-Flow: hello (computerName) → user accepts → capabilities → offer (SDP + video settings) → answer → ICE candidates → video. The receiver reserves the session while acceptance is pending and replies BUSY to another sender. Rejection returns REJECTED. Version errors return VERSION_MISMATCH. ICE is queued until remote SDP is set. No public STUN/TURN services are used.
+Flow: hello (computerName) → user accepts → capabilities → offer (SDP + video settings) → answer → ICE candidates → media. The receiver reserves the session while acceptance is pending and replies BUSY to another sender. Rejection returns REJECTED. Version errors return VERSION_MISMATCH. ICE is queued until remote SDP is set. No public STUN/TURN services are used.
 
 Both peers send ping every two seconds and answer pong; six seconds without signaling traffic ends the session. Human acceptance expires after 30 seconds; after acceptance the media handshake has ten seconds. disconnect and socket close release the reservation and all media resources.
 
-The offer contains H.264 sendonly video, RTP packetization-mode=1, Constrained Baseline, Level 3.1 for 720p30 or Level 4.0 for 1080p30. Media uses UDP ICE plus DTLS/SRTP. RTCP NACK and PLI provide retransmission and keyframe recovery. SPS/PPS are sent with IDR frames; encoded frame timestamps share one monotonic capture clock.
+The offer contains H.264 sendonly video, RTP packetization-mode=1, Constrained Baseline, Level 3.1 for 720p30 or Level 4.0 for 1080p30. Media uses UDP ICE plus DTLS/SRTP. RTCP NACK and PLI provide retransmission and keyframe recovery. SPS/PPS are sent with IDR frames.
+
+Receivers may advertise optional `opus: true` in `capabilities` when their audio receiver supports Opus 48 kHz stereo. The sender then adds sendonly Opus (payload type 111, SSRC 43, 20 ms frames, 128 kbps) alongside H.264 (payload type 102, SSRC 42). Both use BUNDLE on the same PeerConnection, CNAME `lanscreencast`, and stream ID `screen`. Missing or false `opus` preserves video-only negotiation, so protocolVersion remains 2. JPEG has no audio path.
+
+Windows captures the default rendering endpoint using shared WASAPI loopback and converts to interleaved stereo float PCM at 48 kHz. Endpoint changes and capture errors trigger retry while sending silence. Samples are bounded and late audio is dropped after a sender stall. Video capture timestamps and audio QPC timestamps use a common monotonic origin; RTCP sender reports map both RTP clocks (90 kHz video, 48 kHz audio) to one fixed NTP epoch, including capture/encode delays. Android uses media audio output without recording, applies local mute and audio focus, and releases playback on disconnect.
 
 stats reports actual rendered fps, received bitrate (bits/second), RTT (milliseconds), packet loss percent, and decoder implementation. Windows logs encoder name, hardware mode, dimensions, process CPU percent, capture/encode durations, and dropped queued frames.
 

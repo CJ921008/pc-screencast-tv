@@ -1,6 +1,6 @@
 # LAN ScreenCast
 
-当前版本 **0.5.0**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
+当前版本 **0.5.0**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频和系统声音，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
 
 ## 目录
 
@@ -33,7 +33,7 @@ C:\tools\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 $env:VCPKG_ROOT = 'C:\tools\vcpkg'
 ```
 
-工程会从 `windows/vcpkg.json` 自动还原 `x64-windows-static-md` 依赖，锁定 libdatachannel 0.24.5。首次构建包含依赖编译，耗时明显高于后续构建。打开 Visual Studio 时同样需要继承 `VCPKG_ROOT` 环境变量。
+工程会从 `windows/vcpkg.json` 自动还原 `x64-windows-static-md` 依赖，锁定 libdatachannel 0.24.5，并安装 libopus 音频编码依赖。首次构建包含依赖编译，耗时明显高于后续构建。打开 Visual Studio 时同样需要继承 `VCPKG_ROOT` 环境变量。
 
 工程使用 Windows App SDK 2.4.0 和 MSBuild。首次部署可能需要启用 Windows 开发人员模式。Windows 默认选择 H.264/WebRTC、720p、30 FPS。日志位于应用私有 LocalFolder 下的 `logs\lanscreencast.log`，通常在 `%LOCALAPPDATA%\Packages\LANScreenCast.Sender_*\LocalState\logs\`。
 
@@ -62,6 +62,14 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 H.264 信令地址为 `ws://IP:47475/signaling`；局域网 ICE 使用动态 UDP 端口，不依赖公网服务器。电脑与接收端应处于允许设备互访的同一局域网。Windows 防火墙提示出现时，应允许此应用在**专用网络**通信；访客 Wi-Fi 的设备隔离会阻止连接。`Test-NetConnection IP -Port 47475` 只能验证信令端口，不能证明 UDP 视频通道可达。
 
+### 系统声音
+
+两端安装包含音频功能的新构建后，H.264 模式会自动传输 Windows 默认播放设备的系统混音，使用 WASAPI loopback 采集、Opus 48 kHz 双声道、128 kbps、20 ms 音频包。音频与视频复用同一条 WebRTC 加密连接和现有 IPv6 端口，时间戳使用共同的单调时钟和 RTCP 时间映射。
+
+手机和电视画面下方可点“静音”或“开启声音”，实体音量键调节媒体音量。退到后台或失去音频焦点时暂停播放；临时打断结束后恢复，需重新取得焦点时可点“恢复声音”。停止投屏和断线会释放音频设备。Windows 切换默认播放设备后会自动重新采集；暂时无设备时发送静音并重试，状态和日志会说明原因。
+
+采集范围是默认输出设备上的系统声音，包含其他应用的提示声；接收端不采集麦克风。发送到其他输出设备的应用声音、受保护内容和独占输出可能无法采集。旧端未协商 Opus 时保持视频投屏，JPEG 兼容模式仅传画面。
+
 ### 手机键鼠
 
 1. 在 Windows 选择 H.264 并勾选“允许接收手机控制键盘和鼠标”，然后开始投屏。在手机接受后，画面下方出现控制栏。每次新会话都需要勾选。
@@ -75,7 +83,7 @@ H.264 信令地址为 `ws://IP:47475/signaling`；局域网 ICE 使用动态 UDP
 ### 公网 IPv6 远程接入
 
 1. 在 Windows 和手机安装 0.5.0。电脑保持开机、登录且桌面可用。在 Windows 选择 **公网 IPv6 远程接入（H.264）**，填写这台电脑网卡的公网 IPv6，点 **开始投屏**。需要操作键鼠时，在开始前勾选键鼠授权。
-2. 家庭路由器的 IPv6 入站规则和 Windows 防火墙需允许到此电脑的 **TCP 47476**（加密信令）和 **UDP 47500–47509**（视频与控制）。管理员 PowerShell 可用以下命令设置 Windows 防火墙。替换为电脑的实际地址。
+2. 家庭路由器的 IPv6 入站规则和 Windows 防火墙需允许到此电脑的 **TCP 47476**（加密信令）和 **UDP 47500–47509**（音视频与控制）。管理员 PowerShell 可用以下命令设置 Windows 防火墙。替换为电脑的实际地址。
 
 ```powershell
 $ip = "你的电脑公网IPv6"
@@ -84,13 +92,13 @@ New-NetFirewallRule -Name "LANScreenCastIPv6Media" -DisplayName "LAN ScreenCast 
 ```
 
 3. Windows 点 **复制配对码**。在手机点 **连接家里电脑**，填电脑的公网 IPv6 并粘贴配对码。配对成功后可用 **连接已配对电脑**。配对码同时含证书指纹和远程访问凭据，请仅在自己控制的设备间传递。勾选 **下次启动远程接入时重置配对** 后重新启动接入，旧配对码会失效。
-4. 手机关掉 Wi-Fi，用支持 IPv6 的 4G/5G 验证视频和键鼠。已连上却看不到画面时，检查 UDP 范围以及电脑桌面是否可采集。Windows **停止投屏** 会关闭远程监听。防火墙规则可用 `Remove-NetFirewallRule -Name LANScreenCastIPv6Signal,LANScreenCastIPv6Media` 删除。
+4. 手机关掉 Wi-Fi，用支持 IPv6 的 4G/5G 验证画面、声音和键鼠。已连上却看不到画面时，检查 UDP 范围以及电脑桌面是否可采集。Windows **停止投屏** 会关闭远程监听。防火墙规则可用 `Remove-NetFirewallRule -Name LANScreenCastIPv6Signal,LANScreenCastIPv6Media` 删除。
 
-远程入口使用配对时固定的 TLS 证书指纹，视频和键鼠通过 WebRTC 加密直连。家庭 IPv6 变更时需更新 Windows 监听地址、相关防火墙规则和手机保存的地址。局域网使用的 TCP 47474/47475 端口应留在局域网。
+远程入口使用配对时固定的 TLS 证书指纹，音视频和键鼠通过 WebRTC 加密直连。家庭 IPv6 变更时需更新 Windows 监听地址、相关防火墙规则和手机保存的地址。局域网使用的 TCP 47474/47475 端口应留在局域网。
 
 Windows 窗口显示实际发送/渲染 FPS、编码器模式、码率、RTT 与丢包。软件编码降到 720p，性能由设备决定。选择“JPEG 兼容模式”时使用原有 `LSC1` 和 47474 端口，没有接受请求窗口；新模式失败会报告原因，用户可手动切换。
 
-Android 日志位于 `files/logs/lanscreencast.log`，可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。`DECODER` 记录实际解码器；`FIRST_FRAME_MS` 记录从接受到首帧的时间；`STATS` 记录渲染 FPS/码率/RTT/丢包。Windows `VIDEO/STATS` 还记录进程 CPU、captureMs、encodeMs、queueDropped。captureMs 包含等待桌面更新的时间；encodeMs 包含颜色转换、编码和发送回调，均不能等同于端到端延迟。
+Android 日志位于 `files/logs/lanscreencast.log`，可用 `adb shell run-as com.lanscreencast.tv cat files/logs/lanscreencast.log` 查看。`DECODER` 记录实际解码器；`FIRST_FRAME_MS` 记录从接受到首帧的时间；`STATS` 记录渲染 FPS/码率/RTT/丢包。Windows `VIDEO/STATS` 还记录进程 CPU、captureMs、encodeMs、queueDropped，`AUDIO/STATUS` 记录系统声音采集和重试状态。captureMs 包含等待桌面更新的时间；encodeMs 包含颜色转换、编码和发送回调，均不能等同于端到端延迟。
 
 
 如果设备上曾安装不同签名的调试包，`adb install -r` 会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`；先卸载旧版，再安装新包。卸载会清除该应用的本地数据和日志。

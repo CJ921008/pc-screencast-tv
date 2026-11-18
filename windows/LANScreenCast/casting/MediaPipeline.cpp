@@ -79,8 +79,8 @@ struct DesktopSource::Impl {
     DXGI_MODE_ROTATION rotation = DXGI_MODE_ROTATION_IDENTITY;
     RECT bounds{};
     bool separatePointer = false;
-    std::chrono::steady_clock::time_point origin = std::chrono::steady_clock::now();
-    Impl() {
+    std::chrono::steady_clock::time_point origin;
+    explicit Impl(std::chrono::steady_clock::time_point start) : origin(start) {
         ComPtr<IDXGIFactory1> factory; Check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "Create DXGI factory");
         for (UINT a = 0;; ++a) {
             ComPtr<IDXGIAdapter1> adapter;
@@ -128,7 +128,7 @@ struct DesktopSource::Impl {
         return frame;
     }
 };
-DesktopSource::DesktopSource() : impl(std::make_unique<Impl>()) {}
+DesktopSource::DesktopSource(std::chrono::steady_clock::time_point origin) : impl(std::make_unique<Impl>(origin)) {}
 DesktopSource::~DesktopSource() = default;
 ID3D11Device* DesktopSource::Device() const { return impl->device.Get(); }
 RECT DesktopSource::Bounds() const { return impl->bounds; }

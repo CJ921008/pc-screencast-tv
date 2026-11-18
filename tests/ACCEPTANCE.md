@@ -1,21 +1,29 @@
-# 0.3.0 video acceptance
+# Media acceptance
 
 Build and signing success are separate from physical-device performance.
 
 ## Automated
 
-- Android: ./gradlew :app:testDebugUnitTest :app:assembleDebug. Five signaling-state tests cover early ICE, invalid order, rejection/reset, bounded ICE queue, and JPEG/WebRTC exclusion.
-- Protocol: pip install jsonschema==4.23.0; python protocol/check_schema.py. Ten message payloads plus invalid version, resolution, and type.
+- Android: ./gradlew :app:testDebugUnitTest :app:assembleDebug. Signaling-state tests cover early ICE, invalid order, rejection/reset, bounded ICE queue, and JPEG/WebRTC exclusion; listener tests cover cleanup and rebinding.
+- Protocol: pip install jsonschema==4.23.0; python protocol/check_schema.py. Ten message payloads plus invalid version, resolution, type, and optional Opus capability.
 - Windows: build the app, then CMake windows/tests with the same vcpkg toolchain and installed directory; run ctest. The test generates 60 moving NV12 frames, requests IDRs, checks timestamps, encodes and decodes with software H.264, and sends the result over a real WebRTC loopback.
+- Audio: the same CMake/ctest run includes `system-audio-codec-and-webrtc`. It encodes/decodes one second of distinct left/right test tones, checks 20 ms Opus frames, RTP wrap and shared RTP/NTP mapping, then sends 50 audio and 25 video packets together through IPv4 and IPv6 WebRTC loopback. This does not exercise a physical WASAPI output device or Android speaker.
 
 ## Physical Windows and receiver
 
-1. Install both 0.3.0 packages; allow Windows private-network access. Start the receiver, enter its IP on Windows, choose H.264/WebRTC, 720p, 30 FPS, and accept on the receiver.
+1. Install fresh builds on both endpoints; allow Windows private-network access. Start the receiver, enter its IP on Windows, choose H.264/WebRTC, 720p, 30 FPS, and accept on the receiver.
 2. Run a continuous moving test pattern or scrolling content for ten minutes, then repeat at 1080p30. Record encoder and decoder names, hardware/software mode, sent/rendered FPS, bitrate, CPU, RTT, packet loss, encodeMs, captureMs and queueDropped from the logs.
 3. Hardware acceptance: mean rendered FPS >=27 for each supported resolution, first frame <=3000 ms after acceptance, no cursor flashing, garbled text, crashes, or growing frame backlog. Software fallback defaults to 720p and reports measured performance without this hardware guarantee.
 4. To measure end-to-end latency, record the same millisecond clock on the computer and receiving screen in one camera view. Compute P95 across at least 100 samples; initial target <=250 ms. Unaligned clocks and encodeMs are not end-to-end measurements.
 5. Stop/start three times, reject a request, attempt a second sender while acceptance is pending and while streaming, disconnect Wi-Fi, close each app, change display mode, and retry manually. Verify cleanup and an actionable status. Test forced software encoding in the native test and JPEG compatibility on the same receiver.
 6. For comparison, run the same moving content at 720p30 in JPEG mode and record the same metrics; do not compare static-screen FPS to dynamic content.
+
+## System audio on physical devices
+
+1. Play stereo test tones and an audiovisual flash/click clip on the Windows default output. Verify both channels on the receiver, record lip-sync and overall latency, and watch for drift over ten minutes. Repeat with software H.264 fallback and with the phone on IPv6 mobile data using the existing remote connection ports.
+2. Test local mute/unmute with touch and TV remote, media volume buttons, background/foreground, a transient audio-focus interruption, and permanent focus loss followed by “恢复声音”. Verify that receiver microphone access is never requested.
+3. Switch the Windows default output between available speakers/headphones. Remove the output temporarily and restore it; verify silence, status/retry and automatic recovery without replaying stale audio. Check Windows `AUDIO/STATUS` logs.
+4. Stop/start and disconnect during playback three times; verify audio stops promptly, devices and focus are released, and the next session plays normally. Confirm an older video-only receiver still connects and JPEG stays video-only.
 
 ## Browser-to-Android integration diagnostic
 

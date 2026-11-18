@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import androidx.tv.material3.Button
 
 @Composable
 internal fun ControlledVideo(
@@ -40,6 +41,8 @@ internal fun ControlledVideo(
     onText: () -> Unit,
     onShortcuts: () -> Unit,
     onDisconnect: (() -> Unit)? = null,
+    audioState: AudioPlaybackState? = null,
+    onAudioToggle: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -89,13 +92,30 @@ internal fun ControlledVideo(
                 ControlButton(if (dragging) "松开" else "拖拽") { onDrag(!dragging) }
                 ControlButton("输入文字", onText)
                 ControlButton("快捷键", onShortcuts)
+                if (audioState != null) AudioButton(audioState, onAudioToggle)
                 if (onDisconnect != null) ControlButton("断开", onDisconnect)
             }
-        } else if (onDisconnect != null) {
-            Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.CenterEnd) {
-                ControlButton("断开远程连接", onDisconnect)
+        } else if (onDisconnect != null || audioState != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (audioState != null) AudioButton(audioState, onAudioToggle)
+                if (onDisconnect != null) ControlButton("断开远程连接", onDisconnect)
             }
         }
+    }
+}
+
+@Composable
+private fun AudioButton(state: AudioPlaybackState, onClick: () -> Unit) {
+    Button(onClick = onClick) {
+        Text(when {
+            state.muted -> "开启声音"
+            state.interrupted -> "恢复声音"
+            else -> "静音"
+        })
     }
 }
 

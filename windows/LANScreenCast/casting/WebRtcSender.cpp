@@ -4,6 +4,8 @@
 #include <windows.h>
 #include <mfapi.h>
 #include "WebRtcSender.h"
+#include "AudioPipeline.h"
+#include "MediaClock.h"
 #include "RemoteInput.h"
 #include "SignalProtocol.h"
 #include "logging/FileLogger.h"
@@ -53,8 +55,9 @@ struct Shared {
     std::deque<VideoFrame> frames;
     std::condition_variable ready;
     std::string error;
-    std::atomic_bool done{false}, trackOpen{false}, forceKey{true};
+    std::atomic_bool done{false}, trackOpen{false}, audioOpen{false}, forceKey{true};
     std::atomic_uint64_t dropped{0}, captureUs{0};
+    std::string audioStatus;
     void fail(std::string const& value) { std::lock_guard lock(mutex); if (!done && error.empty()) error = value; ready.notify_all(); }
 };
 struct FrameTimer {
@@ -90,15 +93,18 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
     std::function<void(std::wstring const&)> const& onStatus) {
     HRESULT apartment = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(apartment)) throw std::runtime_error("COM initialization failed");
-    struct Runtime { ~Runtime() { MFShutdown(); CoUninitialize(); } } runtime;
+    struct Apartment { ~Apartment() { CoUninitialize(); } } apartmentLifetime;
     if (FAILED(MFStartup(MF_VERSION))) throw std::runtime_error("Media Foundation unavailable");
+    struct MediaRuntime { ~MediaRuntime() { MFShutdown(); } } mediaRuntime;
     settings.fps = std::clamp(settings.fps, 10, 30);
-    DesktopSource capture;
+    auto mediaClock = std::make_shared<MediaClock>();
+    DesktopSource capture(mediaClock->origin);
     auto encoder = std::make_unique<H264Encoder>(capture.Device(), settings);
     settings = encoder->Settings();
     auto shared = std::make_shared<Shared>();
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::Track> track;
+    std::shared_ptr<rtc::Track> audioTrack;
     std::shared_ptr<rtc::DataChannel> control;
     auto input = std::make_shared<RemoteInput>(capture.Bounds(), controlPermission);
     std::jthread controlWatchdog;
@@ -106,10 +112,12 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
     auto lastView = Clock::time_point{};
     std::string previousView;
     std::thread producer;
+    std::thread audioProducer;
     std::string session = Id();
     struct Cleanup {
         std::shared_ptr<Shared> state;
         std::thread& producer;
+        std::thread& audioProducer;
         std::shared_ptr<rtc::WebSocket> ws;
         std::shared_ptr<rtc::PeerConnection>& pc;
         std::shared_ptr<RemoteInput> input;
@@ -118,11 +126,12 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
             input->Close();
             state->done = true; state->ready.notify_all();
             if (producer.joinable()) producer.join();
+            if (audioProducer.joinable()) audioProducer.join();
             try { if (ws->isOpen()) ws->send(Message("disconnect", session, json::object()).dump()); } catch (...) {}
             if (pc) pc->close();
             ws->close();
         }
-    } cleanup{shared,producer,ws,pc,input,session};
+    } cleanup{shared,producer,audioProducer,ws,pc,input,session};
     ws->onMessage([shared](rtc::message_variant message) {
         if (auto text = std::get_if<std::string>(&message)) {
             std::lock_guard lock(shared->mutex);
@@ -235,11 +244,30 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
                 track = pc->addTrack(video);
                 auto configRtp = std::make_shared<rtc::RtpPacketizationConfig>(42,"lanscreencast",102,90000);
                 auto packetizer = std::make_shared<rtc::H264RtpPacketizer>(rtc::NalUnit::Separator::StartSequence,configRtp);
-                packetizer->addToChain(std::make_shared<rtc::RtcpSrReporter>(configRtp));
+                packetizer->addToChain(std::make_shared<SynchronizedRtcpReporter>(configRtp, mediaClock));
                 packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>());
                 packetizer->addToChain(std::make_shared<rtc::PliHandler>([shared] { shared->forceKey = true; }));
                 track->setMediaHandler(packetizer);
                 track->onOpen([shared] { shared->trackOpen = true; });
+                if (payload.value("opus", false)) {
+                    rtc::Description::Audio audio("audio", rtc::Description::Direction::SendOnly);
+                    audio.addOpusCodec(111, "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;maxaveragebitrate=128000");
+                    audio.addSSRC(43, "lanscreencast", "screen", "audio");
+                    audioTrack = pc->addTrack(audio);
+                    auto audioRtp = std::make_shared<rtc::RtpPacketizationConfig>(43, "lanscreencast", 111, 48000);
+                    auto audioPackets = std::make_shared<rtc::OpusRtpPacketizer>(audioRtp);
+                    audioPackets->addToChain(std::make_shared<SynchronizedRtcpReporter>(audioRtp, mediaClock));
+                    audioPackets->addToChain(std::make_shared<rtc::RtcpNackResponder>());
+                    audioTrack->setMediaHandler(audioPackets);
+                    audioTrack->onOpen([shared] { shared->audioOpen = true; });
+                    auto audioClosed = [shared] {
+                        shared->audioOpen = false;
+                        std::lock_guard lock(shared->mutex);
+                        shared->audioStatus = "系统声音连接已关闭";
+                    };
+                    audioTrack->onClosed(audioClosed);
+                    audioTrack->onError([audioClosed](std::string) { audioClosed(); });
+                }
                 if (*controlPermission && payload.value("remoteInput", false)) {
                     control = pc->createDataChannel("lsc-input-v1");
                     control->onMessage([input](rtc::message_variant message) {
@@ -275,11 +303,14 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
                 std::wostringstream rate,loss;
                 rate<<std::fixed<<std::setprecision(2)<<bytes*8/std::max(.1,elapsed)/1000000;
                 loss<<std::fixed<<std::setprecision(1)<<payload.value("lossPercent",0.0);
+                std::string audioStatus;
+                { std::lock_guard lock(shared->mutex); audioStatus = shared->audioStatus; }
                 auto text = encoderStatus() + L" · 发送 " + std::to_wstring(std::lround(sent / std::max(.1,elapsed))) +
                     L" FPS · 接收 " + std::to_wstring(std::lround(payload.value("fps",0.0))) +
                     L" FPS · " + rate.str() +
                     L" Mbps · RTT " + std::to_wstring(int(payload.value("rttMs",0.0))) +
                     L" ms · 丢包 " + loss.str() + L"%";
+                if (audioTrack) text += L" · " + (audioStatus.empty() ? std::wstring(L"系统声音连接中") : Wide(audioStatus));
                 onStatus(text);
                 payload["encoder"]=Utf8(encoder->Name());payload["hardware"]=encoder->Hardware();
                 payload["width"]=settings.width;payload["height"]=settings.height;payload["cpuPercent"]=cpu;
@@ -346,6 +377,30 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
                         timer.until(start + period);
                     }
                 } catch (std::exception const& error) { shared->fail(error.what()); }
+            });
+        }
+        if (started && shared->audioOpen && !audioProducer.joinable()) {
+            audioProducer = std::thread([shared, mediaClock, audioTrack] {
+                auto report = [shared](std::string message) {
+                    {
+                        std::lock_guard lock(shared->mutex);
+                        shared->audioStatus = message;
+                    }
+                    logging::FileLogger::Write(L"INFO", L"AUDIO", L"STATUS", Wide(message));
+                };
+                try {
+                    SystemAudioSender audio(mediaClock->origin);
+                    audio.Run(shared->done, [shared, mediaClock, audioTrack](std::vector<uint8_t> packet, int64_t time100ns) {
+                        auto now100ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            Clock::now() - mediaClock->origin).count() / 100;
+                        if (shared->done || !shared->audioOpen || !audioTrack->isOpen() ||
+                            audioTrack->bufferedAmount() > 16384 || now100ns - time100ns > 1500000) return;
+                        audioTrack->sendFrame(reinterpret_cast<std::byte const*>(packet.data()), packet.size(),
+                            rtc::FrameInfo(std::chrono::duration<double>(time100ns / 10000000.0)));
+                    }, report);
+                } catch (std::exception const& error) {
+                    report(std::string("系统声音已停止：") + error.what());
+                }
             });
         }
         VideoFrame frame;

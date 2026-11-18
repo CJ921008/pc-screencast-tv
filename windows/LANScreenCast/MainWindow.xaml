@@ -35,7 +35,7 @@
                 <CheckBox x:Name="ResetPairing" Content="下次启动远程接入时重置配对" />
             </StackPanel>
             <TextBlock x:Name="StatusText" Text="等待连接" TextWrapping="Wrap" />
-            <TextBlock Text="当前版本传输桌面画面，暂不传输系统声音。" Opacity="0.7" TextWrapping="Wrap" />
+            <TextBlock Text="H.264 模式同步传输桌面画面和默认播放设备的系统声音。" Opacity="0.7" TextWrapping="Wrap" />
         </StackPanel>
         </ScrollViewer>
     </Grid>

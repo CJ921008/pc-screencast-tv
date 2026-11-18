@@ -2,6 +2,7 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -20,7 +21,7 @@ namespace LANScreenCast::casting {
         struct Impl;
         std::unique_ptr<Impl> impl;
     public:
-        DesktopSource();
+        explicit DesktopSource(std::chrono::steady_clock::time_point origin = std::chrono::steady_clock::now());
         ~DesktopSource();
         ID3D11Device* Device() const;
         RECT Bounds() const;

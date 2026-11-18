@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD 20)
 find_package(LibDataChannel CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(Opus CONFIG REQUIRED)
 add_executable(video-checks VideoChecks.cpp
     ../LANScreenCast/casting/MediaPipeline.cpp
     ../LANScreenCast/casting/RemoteInput.cpp
@@ -13,3 +14,8 @@ target_link_libraries(video-checks PRIVATE LibDataChannel::LibDataChannel nlohma
 enable_testing()
 add_test(NAME software-encoder-and-webrtc COMMAND video-checks)
 set_tests_properties(software-encoder-and-webrtc PROPERTIES TIMEOUT 60)
+add_executable(audio-checks AudioChecks.cpp ../LANScreenCast/casting/AudioPipeline.cpp)
+target_compile_options(audio-checks PRIVATE /utf-8)
+target_link_libraries(audio-checks PRIVATE LibDataChannel::LibDataChannel Opus::opus ole32)
+add_test(NAME system-audio-codec-and-webrtc COMMAND audio-checks)
+set_tests_properties(system-audio-codec-and-webrtc PROPERTIES TIMEOUT 30)

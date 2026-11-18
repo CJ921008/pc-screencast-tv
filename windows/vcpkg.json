@@ -4,7 +4,8 @@
   "dependencies": [
     { "name": "libdatachannel", "features": ["ws", "srtp"] },
     "nlohmann-json",
-    "openssl"
+    "openssl",
+    "opus"
   ],
   "overrides": [{ "name": "libdatachannel", "version": "0.24.5" }]
 }
