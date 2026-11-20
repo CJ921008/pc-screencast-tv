@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安卓接收端 · LAN ScreenCast 设计稿</title>
+<link rel="stylesheet" href="console.css">
+<style>
+.wrap{max-width:960px}.device{position:relative;max-width:410px;min-height:690px;margin:auto}.device.wide{max-width:920px;min-height:0;aspect-ratio:16/9}.home{padding:30px 22px 24px;display:grid;gap:22px}.home h1{font-size:30px}.home .panel{padding:17px}.home .primary{width:100%}.wide .home{padding:clamp(18px,4vw,38px);grid-template-columns:1fr 1fr;align-items:start}.wide .intro{grid-row:span 2}.playing{background:#000;display:grid;place-items:center}#playback{width:100%}.screen{width:100%;aspect-ratio:16/9;background:radial-gradient(ellipse at 64% 64%,#509d83 0,transparent 54%),repeating-linear-gradient(115deg,#0000 0 34px,#c4ffe112 34px 35px),linear-gradient(135deg,#132336,#22534c 60%,#172e30);display:grid;place-items:center}.wallpaper{width:62%;height:66%;border:1px solid #92d8bf66;border-radius:10px;background:linear-gradient(125deg,#101914e8,#1c342bc4);box-shadow:0 15px 38px #06130c66;padding:8%;display:grid;align-content:center;gap:4px}.wallpaper strong{font-size:clamp(12px,3vw,34px)}.wallpaper small{color:#c0edd8}.float{position:absolute;top:14px;right:14px;padding:0;width:44px;min-height:44px;border-radius:50%;background:#141d19e8;font-size:23px}.scrim{position:absolute;inset:0;background:#07110d55}.menu{position:absolute;z-index:1;top:14px;right:14px;width:min(270px,calc(100% - 28px));max-height:calc(100% - 28px);overflow:auto;background:#18211efc;padding:14px;display:grid;gap:10px}.menu button{text-align:left}.menu header{display:flex;align-items:center;justify-content:space-between}.menu header button{padding:0;width:44px;text-align:center}.danger{color:var(--warn)}dialog{background:var(--panel);border-color:var(--line);border-radius:16px;color:var(--ink);width:min(355px,90vw)}@media(max-width:500px){.device{min-height:min(690px,calc(100dvh - 105px))}.device.wide{min-height:340px}.wide .home{grid-template-columns:1fr}}
+</style>
+<div class="wrap">
+  <div class="demo"><strong>安卓设计稿</strong><button id="phone" aria-pressed="true">手机</button><button id="tv" aria-pressed="false">电视</button><button id="homeTab" aria-pressed="true">等待页</button><button id="playTab" aria-pressed="false">播放页</button></div>
+  <main class="frame device" id="device">
+    <div class="home" id="home">
+      <header class="stack intro"><div class="brand"><span class="mark" aria-hidden="true">▣</span><strong>LAN ScreenCast</strong></div><h1>投屏接收器</h1><p role="status" id="status"><i class="dot"></i>等待连接</p></header>
+      <section class="panel stack">
+        <h2>家里电脑</h2><p>视频、声音和键鼠控制。</p><button class="primary" id="connect">连接家里电脑</button><button id="manage" hidden>重新配对或忘记电脑</button>
+      </section>
+      <section class="panel stack"><h2>局域网接收</h2><strong class="mono">192.168.1.25</strong><p>在 Windows 端输入此地址，开始投屏。</p></section>
+      <dialog id="pair"><form method="dialog" class="stack"><h2>配对家里电脑</h2><div><label for="ip">电脑的公网 IPv6</label><input id="ip" placeholder="例如 240e:…"></div><div><label for="code">配对码</label><input id="code" placeholder="从 Windows 复制" type="password"></div><div class="row"><button value="cancel">取消</button><button class="primary" value="connect">配对并连接</button></div></form></dialog>
+    </div>
+    <div id="playback" hidden>
+      <div class="screen" id="screen" aria-label="投屏画面示例"><div class="wallpaper"><small>Windows 桌面</small><strong>投屏画面</strong><small>16:9 · H.264</small></div></div>
+      <button class="float" id="open" aria-label="显示投屏控制" aria-expanded="false">⋯</button>
+      <div class="scrim" id="scrim" hidden></div>
+      <section class="panel menu" id="menu" aria-label="投屏控制" hidden>
+        <header><h3>投屏控制</h3><button id="close" aria-label="收起控件">✕</button></header>
+        <button id="mode">当前为触控板</button><button id="drag">拖拽</button><button id="text">输入文字</button><button id="keys">快捷键</button><button id="mute">静音</button><button id="exit" class="danger">断开远程连接</button>
+      </section>
+      <dialog id="tool"><form method="dialog" class="stack"><h2 id="toolTitle"></h2><input id="toolValue" placeholder="输入文字"><button class="primary">完成</button></form></dialog>
+    </div>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let paired = false, playing = false;
+function menu(open) {
+  $('menu').hidden = $('scrim').hidden = !open;
+  $('open').hidden = open;
+  $('open').setAttribute('aria-expanded',open);
+  if (playing) $(open ? 'close' : 'open').focus();
+}
+function page(play){
+  playing = play;
+  $('home').hidden = play;
+  $('playback').hidden = !play;
+  $('device').classList.toggle('playing',play);
+  $('homeTab').setAttribute('aria-pressed',!play);
+  $('playTab').setAttribute('aria-pressed',play);
+  menu(false);
+}
+$('phone').onclick = () => { $('device').classList.remove('wide'); $('phone').setAttribute('aria-pressed',true); $('tv').setAttribute('aria-pressed',false); };
+$('tv').onclick = () => { $('device').classList.add('wide'); $('tv').setAttribute('aria-pressed',true); $('phone').setAttribute('aria-pressed',false); };
+$('homeTab').onclick = () => page(false);
+$('playTab').onclick = () => page(true);
+$('connect').onclick = () => paired ? page(true) : $('pair').showModal();
+$('manage').onclick = () => $('pair').showModal();
+$('pair').onclose = () => { if ($('pair').returnValue === 'connect') { paired = true; $('connect').textContent = '连接已配对电脑'; $('manage').hidden = false; page(true); } };
+$('open').onclick = () => menu(true);
+$('close').onclick = $('scrim').onclick = () => menu(false);
+$('exit').onclick = () => page(false);
+$('mode').onclick = () => $('mode').textContent = $('mode').textContent === '当前为触控板' ? '当前为直接触摸' : '当前为触控板';
+$('drag').onclick = () => { $('drag').textContent = $('drag').textContent === '拖拽' ? '松开' : '拖拽'; menu(false); };
+$('mute').onclick = () => $('mute').textContent = $('mute').textContent === '静音' ? '开启声音' : '静音';
+function tool(title, text) { menu(false); $('toolTitle').textContent = title; $('toolValue').hidden = !text; $('tool').showModal(); }
+$('text').onclick = () => tool('输入文字',true);
+$('keys').onclick = () => tool('快捷键 · Ctrl / Shift / Alt / Win',false);
+document.addEventListener('keydown',e => {
+  if (e.key === 'Escape' && playing && !$('menu').hidden) { menu(false); e.preventDefault(); }
+  if ($('tv').getAttribute('aria-pressed') !== 'true' || $('tool').open || $('menu').hidden || !e.key.startsWith('Arrow')) return;
+  const buttons = [...$('menu').querySelectorAll('button')];
+  const index = buttons.indexOf(document.activeElement);
+  if(index < 0) return;
+  buttons[(index + (['ArrowDown','ArrowRight'].includes(e.key) ? 1 : buttons.length - 1)) % buttons.length].focus();
+  e.preventDefault();
+});
+</script>
+</html>

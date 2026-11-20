@@ -76,6 +76,7 @@
     <ClInclude Include="casting\SignalProtocol.h" />
     <ClInclude Include="casting\RemoteInput.h" />
     <ClInclude Include="casting\RemoteAccess.h" />
+    <ClInclude Include="casting\LocalIPv6.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
@@ -92,6 +93,7 @@
     <ClCompile Include="casting\WebRtcSender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteInput.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteAccess.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="casting\LocalIPv6.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteIdentity.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <dpapi.h>
 #include "RemoteAccess.h"
+#include "LocalIPv6.h"
 #include "logging/FileLogger.h"
 #include <rtc/rtc.hpp>
 #include <nlohmann/json.hpp>
@@ -99,7 +100,7 @@ void ServeRemoteWebRtc(std::wstring const& ipv6, std::filesystem::path const& id
     struct Runtime { ~Runtime() { WSACleanup(); } } runtime;
     in6_addr address{};
     char ip[INET6_ADDRSTRLEN]{};
-    if (InetPtonW(AF_INET6, ipv6.c_str(), &address) != 1 || (address.u.Byte[0] & 0xe0) != 0x20 ||
+    if (InetPtonW(AF_INET6, ipv6.c_str(), &address) != 1 || !IsPublicIPv6Prefix(address.u.Byte[0]) ||
         !InetNtopA(AF_INET6, &address, ip, sizeof(ip)))
         throw std::runtime_error("请输入电脑网卡的公网 IPv6 地址（不带方括号）");
 

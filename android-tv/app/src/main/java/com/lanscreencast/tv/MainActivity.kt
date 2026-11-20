@@ -9,26 +9,19 @@ import android.media.AudioManager
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.SurfaceView
-import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Text
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.lanscreencast.tv.logging.FileLogger
 import kotlin.math.min
 
@@ -58,6 +51,8 @@ class MainActivity : ComponentActivity() {
         remoteDevice = RemoteDevice.load(this)
         volumeControlStream = AudioManager.STREAM_MUSIC
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        showFullscreen(false)
         FileLogger.log(this, "INFO", "APP", "STARTED", "Receiver waiting for connection")
         rtcReceiver = WebRtcReceiver(this, gate,
             onRequest = { name, reply -> runOnUiThread {
@@ -71,7 +66,7 @@ class MainActivity : ComponentActivity() {
             onStatus = { value, active -> runOnUiThread {
                 status = value; rtcCasting = active
                 if (!active) requestDialog?.dismiss()
-                showFullscreen(active)
+                showFullscreen(rtcCasting || casting)
             } },
             onControl = { value -> runOnUiThread {
                 control = value
@@ -95,17 +90,17 @@ class MainActivity : ComponentActivity() {
                 status = value
                 casting = value == "正在投屏"
                 if (!casting) surfaceView = null
-                showFullscreen(casting)
+                showFullscreen(rtcCasting || casting)
             } },
             acquire = { gate.acquire("jpeg") },
             release = { gate.release("jpeg") },
         )
         receiver.start()
         setContent {
-            MaterialTheme {
+            CastTheme {
                 BackHandler(enabled = remoteActive) { rtcReceiver.disconnectRemote() }
                 if (rtcCasting) {
-                    ControlledVideo(rtcReceiver, control, direct, dragging,
+                    ControlledVideo(rtcReceiver, status == "正在建立视频连接", control, direct, dragging,
                         onMode = { dragging = false; direct = !direct },
                         onDrag = { dragging = it },
                         onText = {
@@ -127,30 +122,20 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
-                    Column(
-                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text("LAN 投屏接收器", style = MaterialTheme.typography.displayMedium)
-                        Text(status, style = MaterialTheme.typography.headlineMedium)
-                        Text("在 Windows 端输入以下 IP，点击开始投屏")
-                        Text(ScreenReceiver.localAddress() ?: "未连接局域网", style = MaterialTheme.typography.headlineMedium)
-                        Text("H.264 / WebRTC · 47475    JPEG 兼容 · 47474")
-                        if (remoteActive) {
-                            ControlButton("取消远程连接", rtcReceiver::disconnectRemote)
-                        } else {
-                            remoteDevice?.let { device ->
-                                ControlButton("连接已配对电脑") { rtcReceiver.connectRemote(device) }
-                            }
-                            ControlButton(if (remoteDevice == null) "连接家里电脑" else "重新配对或忘记电脑") {
-                                pairingDialog = pairComputerDialog(this@MainActivity, remoteDevice,
-                                    onForget = { RemoteDevice.forget(this@MainActivity); remoteDevice = null },
-                                    onConnect = rtcReceiver::connectRemote,
-                                ).also { it.show() }
-                            }
-                        }
-                    }
+                    ReceiverHome(
+                        status = status,
+                        localAddress = ScreenReceiver.localAddress(),
+                        remoteActive = remoteActive,
+                        paired = remoteDevice != null,
+                        onConnect = { remoteDevice?.let(rtcReceiver::connectRemote) },
+                        onPair = {
+                            pairingDialog = pairComputerDialog(this@MainActivity, remoteDevice,
+                                onForget = { RemoteDevice.forget(this@MainActivity); remoteDevice = null },
+                                onConnect = rtcReceiver::connectRemote,
+                            ).also { it.show() }
+                        },
+                        onCancel = rtcReceiver::disconnectRemote,
+                    )
                 }
             }
         }
@@ -190,11 +175,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showFullscreen(fullscreen: Boolean) {
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = if (fullscreen) {
-            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        } else 0
+        val insets = WindowCompat.getInsetsController(window, window.decorView)
+        insets.isAppearanceLightStatusBars = false
+        insets.isAppearanceLightNavigationBars = false
+        insets.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (fullscreen) insets.hide(WindowInsetsCompat.Type.systemBars())
+        else insets.show(WindowInsetsCompat.Type.systemBars())
     }
 
     override fun onDestroy() {
