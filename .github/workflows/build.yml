@@ -118,7 +118,7 @@ jobs:
           & $signTool.FullName verify /pa /v $msix
           if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $LASTEXITCODE" }
       - name: Verify the installed app opens its main window
-        shell: pwsh
+        shell: powershell
         timeout-minutes: 3
         run: ./windows/tests/Check-InstalledApp.ps1 -PackageDirectory windows-package
       - name: Upload Windows installer

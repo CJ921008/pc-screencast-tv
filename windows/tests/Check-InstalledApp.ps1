@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module Appx
 $msix = Join-Path $PackageDirectory 'VanJScreen-x64.msix'
 $dependencies = @(
     (Join-Path $PackageDirectory 'Dependencies\x64\Microsoft.VCLibs.x64.14.00.appx'),
