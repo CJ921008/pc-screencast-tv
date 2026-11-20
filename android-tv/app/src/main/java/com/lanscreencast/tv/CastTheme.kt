@@ -2,6 +2,10 @@ package com.lanscreencast.tv
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,14 +23,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme
@@ -66,18 +73,35 @@ internal fun CastAction(
     modifier: Modifier = Modifier,
     primary: Boolean = false,
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 48.dp),
-        colors = ButtonDefaults.colors(
-            containerColor = if (primary) CastMint else Color(0xFF26342D),
-            contentColor = if (primary) CastInk else CastText,
-            focusedContainerColor = Color(0xFFDAF9E6),
-            focusedContentColor = CastInk,
-            pressedContainerColor = CastMint,
-            pressedContentColor = CastInk,
-        ),
-    ) { Text(label) }
+    CastButton(modifier, onClick, primary = primary) { color ->
+        Text(label, Modifier.padding(horizontal = 16.dp, vertical = 10.dp), color = color)
+    }
+}
+
+@Composable
+internal fun CastButton(
+    modifier: Modifier,
+    onClick: () -> Unit,
+    primary: Boolean = false,
+    shape: Shape = RoundedCornerShape(10.dp),
+    content: @Composable (Color) -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val background = when {
+        pressed -> CastMint
+        focused -> Color(0xFFDAF9E6)
+        primary -> CastMint
+        else -> Color(0xFF26342D)
+    }
+    Box(
+        modifier.heightIn(min = 48.dp).clip(shape).background(background)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        content(if (focused || pressed || primary) CastInk else CastText)
+    }
 }
 
 @Composable

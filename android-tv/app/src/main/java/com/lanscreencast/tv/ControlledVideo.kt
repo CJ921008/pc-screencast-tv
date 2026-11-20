@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -36,15 +37,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 
@@ -113,14 +111,7 @@ internal fun ControlledVideo(
                     Column(
                         Modifier.widthIn(max = 274.dp).fillMaxWidth().background(CastPanel, shape)
                             .border(1.dp, CastBorder, shape)
-                            .pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        // Consume unhandled touches in the panel without blocking its buttons or scroll.
-                                        awaitPointerEvent(PointerEventPass.Final).changes.forEach { it.consume() }
-                                    }
-                                }
-                            }
+                            .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                             .verticalScroll(rememberScrollState()).padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -167,17 +158,9 @@ internal fun ControlledVideo(
 
 @Composable
 private fun MenuIcon(symbol: String, label: String, modifier: Modifier, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.size(48.dp).semantics { contentDescription = label },
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        colors = ButtonDefaults.colors(
-            containerColor = Color(0xE618211E),
-            contentColor = CastText,
-            focusedContainerColor = CastMint,
-            focusedContentColor = CastBackground,
-        ),
-    ) { Text(symbol, style = MaterialTheme.typography.titleLarge) }
+    CastButton(modifier.size(48.dp).semantics { contentDescription = label }, onClick, shape = CircleShape) { color ->
+        Text(symbol, color = color, style = MaterialTheme.typography.titleLarge)
+    }
 }
 
 @Composable
