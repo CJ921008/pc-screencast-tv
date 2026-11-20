@@ -5,6 +5,7 @@
 #include "casting/RemoteAccess.h"
 #include "casting/LocalIPv6.h"
 #include "logging/FileLogger.h"
+#include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
@@ -20,10 +21,17 @@ namespace winrt::LANScreenCast::implementation
     MainWindow::MainWindow()
     {
         InitializeComponent();
-        Title(L"LAN ScreenCast");
-        auto version = Windows::ApplicationModel::Package::Current().Id().Version();
-        AppVersion().Text(L"LAN ScreenCast  /  " + std::to_wstring(version.Major) + L"." +
+        Title(L"VanJScreen");
+        auto package = Windows::ApplicationModel::Package::Current();
+        auto version = package.Id().Version();
+        AppVersion().Text(L"VanJScreen  /  " + std::to_wstring(version.Major) + L"." +
             std::to_wstring(version.Minor) + L"." + std::to_wstring(version.Build));
+        auto icon = std::filesystem::path(package.InstalledLocation().Path().c_str()) / L"Assets" / L"VanJScreen.ico";
+        try {
+            AppWindow().SetIcon(icon.c_str());
+        } catch (winrt::hresult_error const& error) {
+            ::LANScreenCast::logging::FileLogger::Write(L"WARN", L"APP", L"WINDOW_ICON", error.message().c_str());
+        }
         m_initialized = true;
         ChangeMode(false);
         Closed([this](auto const&, auto const&) {

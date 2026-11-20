@@ -1,6 +1,6 @@
-# LAN ScreenCast
+# VanJScreen
 
-当前版本 **0.6.0**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频和系统声音，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
+当前版本 **0.6.1**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频和系统声音，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
 
 ## 目录
 
@@ -37,13 +37,13 @@ $env:VCPKG_ROOT = 'C:\tools\vcpkg'
 
 工程使用 Windows App SDK 2.4.0 和 MSBuild。首次部署可能需要启用 Windows 开发人员模式。Windows 默认选择 H.264/WebRTC、720p、30 FPS。日志位于应用私有 LocalFolder 下的 `logs\lanscreencast.log`，通常在 `%LOCALAPPDATA%\Packages\LANScreenCast.Sender_*\LocalState\logs\`。
 
-GitHub Actions 的 `LANScreenCast-Windows-x64-MSIX` 产物包含 Release 安装包和测试证书。解压后，在该目录打开**管理员 PowerShell**，执行：
+GitHub Actions 的 `VanJScreen-Windows-x64-MSIX` 产物包含 Release 安装包和测试证书。解压后，在该目录打开**管理员 PowerShell**，执行：
 
 ```powershell
-Import-Certificate -FilePath .\LANScreenCast-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Import-Certificate -FilePath .\VanJScreen-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.appx
 Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.Desktop.appx -ForceApplicationShutdown
-Add-AppxPackage .\LANScreenCast-x64.msix
+Add-AppxPackage .\VanJScreen-x64.msix
 ```
 
 每次 CI 都生成新的测试签名证书。升级先前 CI 安装的 Windows 包前，先在 PowerShell 执行 `Get-AppxPackage LANScreenCast.Sender | Remove-AppxPackage`，再导入本次产物的证书并安装。证书仅用于此测试版；安装前应核对证书来源。旧的 `LANScreenCast-Windows-x64-debug` 是开发构建，不能当安装程序运行。
@@ -58,7 +58,7 @@ cd android-tv
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-安装后可在手机或 Android TV 启动器中找到 **LAN 投屏接收器**。打开后显示本机局域网 IP；在 Windows 输入此 IP，选择画质并点击“开始投屏”，在接收设备上选择“接受”。画面会直接通过 WebRTC 的 MediaCodec 解码和 EGL 渲染；停止或断线后返回等待界面。一次只接收一个会话，接受请求的等待阶段也会占用接收端。
+安装后可在手机或 Android TV 启动器中找到 **VanJScreen**。打开后显示本机局域网 IP；在 Windows 输入此 IP，选择画质并点击“开始投屏”，在接收设备上选择“接受”。画面会直接通过 WebRTC 的 MediaCodec 解码和 EGL 渲染；停止或断线后返回等待界面。一次只接收一个会话，接受请求的等待阶段也会占用接收端。
 
 H.264 信令地址为 `ws://IP:47475/signaling`；局域网 ICE 使用动态 UDP 端口，不依赖公网服务器。电脑与接收端应处于允许设备互访的同一局域网。Windows 防火墙提示出现时，应允许此应用在**专用网络**通信；访客 Wi-Fi 的设备隔离会阻止连接。`Test-NetConnection IP -Port 47475` 只能验证信令端口，不能证明 UDP 视频通道可达。
 
@@ -82,7 +82,7 @@ H.264 信令地址为 `ws://IP:47475/signaling`；局域网 ICE 使用动态 UDP
 
 ### 公网 IPv6 远程接入
 
-1. 在 Windows 和手机安装 0.6.0。电脑保持开机、登录且桌面可用。在 Windows 选择 **公网 IPv6**，点击 **获取 IPv6** 自动填入这台电脑的公网 IPv6，或手动填写地址，再点 **开启远程接入**。需要操作键鼠时，在开始前勾选键鼠授权。
+1. 在 Windows 和手机安装 0.6.1。电脑保持开机、登录且桌面可用。在 Windows 选择 **公网 IPv6**，点击 **获取 IPv6** 自动填入这台电脑的公网 IPv6，或手动填写地址，再点 **开启远程接入**。需要操作键鼠时，在开始前勾选键鼠授权。
 2. 家庭路由器的 IPv6 入站规则和 Windows 防火墙需允许到此电脑的 **TCP 47476**（加密信令）和 **UDP 47500–47509**（音视频与控制）。管理员 PowerShell 可用以下命令设置 Windows 防火墙。替换为电脑的实际地址。
 
 ```powershell
@@ -105,6 +105,6 @@ Android 日志位于 `files/logs/lanscreencast.log`，可用 `adb shell run-as c
 
 ## CI 与协议
 
-`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows Release MSIX 和 Android Debug APK，并上传 `LANScreenCast-Windows-x64-MSIX` 与 `LANScreenCast-Android-TV-debug` 两个产物。
+`.github/workflows/build.yml` 在 GitHub Actions 上分别编译 Windows Release MSIX 和 Android Debug APK，并上传 `VanJScreen-Windows-x64-MSIX` 与 `VanJScreen-Android-debug` 两个产物。
 
 WebRTC 信令协议版本为 2，JSON Schema 包含各类消息的 payload 约束。旧信令外层文档存档为 v1；JPEG 媒体协议保持不变。依赖说明见 [THIRD_PARTY.md](THIRD_PARTY.md)，实机检查见 [tests/ACCEPTANCE.md](tests/ACCEPTANCE.md)。

@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -121,7 +122,7 @@ internal fun ReceiverHome(
         val wide = maxWidth >= 680.dp
         val intro: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("LAN ScreenCast", color = CastMint, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.app_name), color = CastMint, fontWeight = FontWeight.SemiBold)
                 Text("投屏接收器", color = CastText, style = MaterialTheme.typography.headlineLarge)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(8.dp).background(CastMint, CircleShape))

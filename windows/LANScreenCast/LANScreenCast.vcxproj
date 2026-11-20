@@ -103,8 +103,12 @@
     <Image Include="Assets\SplashScreen.png" />
     <Image Include="Assets\Square150x150Logo.png" />
     <Image Include="Assets\Square44x44Logo.png" />
+    <Image Include="Assets\Square44x44Logo.targetsize-*_altform-unplated.png" />
     <Image Include="Assets\Wide310x150Logo.png" />
     <Image Include="Assets\StoreLogo.png" />
+    <Content Include="Assets\VanJScreen.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup Condition="'$(EnableMsixTooling)'=='true'"><ProjectCapability Include="Msix" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
