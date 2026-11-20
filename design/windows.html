@@ -1,96 +1,288 @@
 <!doctype html>
 <html lang="zh-CN">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Windows 发送端 · LAN ScreenCast 设计稿</title>
-<link rel="stylesheet" href="console.css">
-<style>
-.titlebar{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);background:#131c18}.hero{padding:28px 28px 18px;display:grid;gap:7px}.body{padding:0 28px 28px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}.tabs button{flex:1}.mode{display:grid;gap:8px}.actions{border-top:1px solid var(--line);padding-top:16px}.session{align-self:start}.preview{height:120px;border-radius:12px;border:1px solid #40584b;display:grid;place-items:center;color:var(--mint);background:radial-gradient(ellipse at 52% 100%,#2c5641,transparent 70%),repeating-linear-gradient(90deg,#192820 0 29px,#263b30 29px 30px)}.monitor{width:70px;height:44px;border:2px solid currentColor;border-radius:6px;position:relative}.monitor:after{content:"";position:absolute;bottom:-8px;left:20px;width:27px;height:2px;background:currentColor}.note{color:var(--muted);font-size:13px}.section-title{border-bottom:1px solid var(--line);padding-bottom:13px}@media(max-width:760px){.body{grid-template-columns:1fr;padding:0 16px 16px}.hero{padding:22px 16px 16px}}
-</style>
-<div class="wrap">
-  <div class="demo"><strong>Windows 设计稿</strong><button id="scenario" aria-pressed="true">检测示例 · 找到地址</button></div>
-  <main class="frame">
-    <header class="titlebar"><strong>LAN ScreenCast</strong><span class="version">0.6.0</span></header>
-    <div class="hero"><h1>桌面投屏</h1><p>将 Windows 画面和声音投到手机或电视</p></div>
-    <div class="body">
-      <section class="panel stack">
-        <h2>连接设置</h2>
-        <div class="row tabs" aria-label="连接方式"><button id="lan" aria-pressed="true">局域网投屏</button><button id="remote" aria-pressed="false">公网 IPv6</button></div>
-        <div id="localFields" class="mode">
-          <div><label for="receiver">接收设备 IPv4</label><input id="receiver" placeholder="输入手机或电视上显示的 IP" autocomplete="off"></div>
-          <div><label for="codec">投屏格式</label><select id="codec"><option>H.264 · 画面与声音</option><option>JPEG · 兼容模式</option></select></div>
-        </div>
-        <div id="remoteFields" class="mode" hidden>
-          <div><label for="ipv6">本机公网 IPv6</label><div class="field-row"><input class="mono" id="ipv6" placeholder="例如 240e:…" autocomplete="off"><button id="detect">获取 IPv6</button></div></div>
-          <div id="ipv6Tip" class="feedback" role="status">检测本机网卡，也可手动输入。</div>
-        </div>
-        <div class="pair">
-          <div><label for="size">分辨率</label><select id="size"><option>720p</option><option>1080p</option></select></div>
-          <div><label for="fps">目标帧率</label><select id="fps"><option>10 FPS</option><option>15 FPS</option><option>20 FPS</option><option selected>30 FPS</option></select></div>
-        </div>
-        <label id="permission"><input id="control" type="checkbox"> 允许手机控制键盘和鼠标</label>
-      </section>
-      <section class="panel stack session">
-        <h2 class="section-title">会话状态</h2>
-        <div class="preview" aria-hidden="true"><div class="monitor"></div></div>
-        <div><strong><i class="dot"></i><span id="state" role="status">等待连接</span></strong><p id="detail">填写接收设备地址后开始投屏。</p></div>
-        <div class="stack actions">
-          <button class="primary" id="start">开始投屏</button>
-          <button id="revoke" hidden>撤销键鼠控制</button>
-          <section id="pairing" class="stack" hidden><button id="copy" disabled>复制配对码</button><label><input id="reset" type="checkbox"> 下次启动时重置配对</label></section>
-        </div>
-      </section>
-    </div>
-  </main>
-</div>
-<script>
-const $ = id => document.getElementById(id);
-let remote = false, active = false, found = true, revision = 0;
-function refresh(){
-  $('lan').setAttribute('aria-pressed', !remote);
-  $('remote').setAttribute('aria-pressed', remote);
-  $('localFields').hidden = remote;
-  $('remoteFields').hidden = $('pairing').hidden = !remote;
-  const jpeg = !remote && $('codec').selectedIndex === 1;
-  $('size').disabled = active || jpeg;
-  $('permission').hidden = jpeg;
-  $('start').textContent = active ? '停止投屏' : remote ? '开启远程接入' : '开始投屏';
-  $('copy').disabled = !active;
-  $('revoke').hidden = !active || !$('control').checked;
-  for(const id of ['lan','remote','receiver','ipv6','detect','codec','fps','control','reset']) $(id).disabled = active;
-  $('detail').textContent = active ? remote ? '在手机上连接这台电脑。' : '等待手机或电视接受投屏。' : remote ? '填写本机公网 IPv6 后开启接入。' : '填写接收设备地址后开始投屏。';
-}
-$('lan').onclick = () => { remote = false; ++revision; refresh(); };
-$('remote').onclick = () => { remote = true; refresh(); };
-$('codec').onchange = refresh;
-$('scenario').onclick = () => { found = !found; $('scenario').setAttribute('aria-pressed',found); $('scenario').textContent = '检测示例 · ' + (found ? '找到地址' : '无可用地址'); };
-$('ipv6').oninput = () => ++revision;
-$('detect').onclick = () => {
-  const token = ++revision, success = found;
-  $('ipv6Tip').classList.remove('error');
-  $('ipv6Tip').textContent = '正在检测…';
-  $('detect').disabled = true;
-  setTimeout(() => {
-    $('detect').disabled = active;
-    if (token !== revision || active || !remote) {
-      $('ipv6Tip').textContent = '检测已取消';
-      return;
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Windows 发送端 · LAN ScreenCast 设计稿</title>
+  <link rel="stylesheet" href="console.css" />
+  <style>
+    .titlebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #131c18;
     }
-    if (success) $('ipv6').value = '2001:db8:42:21::12';
-    $('ipv6Tip').classList.toggle('error',!success);
-    $('ipv6Tip').textContent = success ? '已填入本机 IPv6 · 以太网（演示地址）' : '未找到公网 IPv6，请检查网络或手动输入。';
-  }, 450);
-};
-$('start').onclick = () => {
-  const address = $(remote ? 'ipv6' : 'receiver');
-  if (!active && !address.value.trim()) { address.focus(); $('state').textContent = '请填写地址'; return; }
-  active = !active;
-  if (!active) $('control').checked = false;
-  $('state').textContent = active ? remote ? '远程接入已开启' : '正在连接接收设备…' : '投屏已停止';
-  refresh();
-};
-$('revoke').onclick = () => { $('control').checked = false; refresh(); };
-$('copy').onclick = () => $('state').textContent = '配对码已复制（演示）';
-refresh();
-</script>
+    .hero {
+      padding: 28px 28px 18px;
+      display: grid;
+      gap: 7px;
+    }
+    .body {
+      padding: 0 28px 28px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+    .tabs button {
+      flex: 1;
+    }
+    .mode {
+      display: grid;
+      gap: 8px;
+    }
+    .actions {
+      border-top: 1px solid var(--line);
+      padding-top: 16px;
+    }
+    .session {
+      align-self: start;
+    }
+    .preview {
+      height: 120px;
+      border-radius: 12px;
+      border: 1px solid #40584b;
+      display: grid;
+      place-items: center;
+      color: var(--mint);
+      background:
+        radial-gradient(ellipse at 52% 100%, #2c5641, transparent 70%),
+        repeating-linear-gradient(90deg, #192820 0 29px, #263b30 29px 30px);
+    }
+    .monitor {
+      width: 70px;
+      height: 44px;
+      border: 2px solid currentColor;
+      border-radius: 6px;
+      position: relative;
+    }
+    .monitor:after {
+      content: "";
+      position: absolute;
+      bottom: -8px;
+      left: 20px;
+      width: 27px;
+      height: 2px;
+      background: currentColor;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .section-title {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 13px;
+    }
+    @media (max-width: 760px) {
+      .body {
+        grid-template-columns: 1fr;
+        padding: 0 16px 16px;
+      }
+      .hero {
+        padding: 22px 16px 16px;
+      }
+    }
+  </style>
+  <div class="wrap">
+    <div class="demo">
+      <strong>Windows 设计稿</strong
+      ><button id="scenario" aria-pressed="true">检测示例 · 找到地址</button>
+    </div>
+    <main class="frame">
+      <header class="titlebar">
+        <strong>LAN ScreenCast</strong><span class="version">0.6.0</span>
+      </header>
+      <div class="hero">
+        <h1>桌面投屏</h1>
+        <p>将 Windows 画面和声音投到手机或电视</p>
+      </div>
+      <div class="body">
+        <section class="panel stack">
+          <h2>连接设置</h2>
+          <div class="row tabs" aria-label="连接方式">
+            <button id="lan" aria-pressed="true">局域网投屏</button
+            ><button id="remote" aria-pressed="false">公网 IPv6</button>
+          </div>
+          <div id="localFields" class="mode">
+            <div>
+              <label for="receiver">接收设备 IPv4</label
+              ><input
+                id="receiver"
+                placeholder="输入手机或电视上显示的 IP"
+                autocomplete="off"
+              />
+            </div>
+            <div>
+              <label for="codec">投屏格式</label
+              ><select id="codec">
+                <option>H.264 · 画面与声音</option>
+                <option>JPEG · 兼容模式</option>
+              </select>
+            </div>
+          </div>
+          <div id="remoteFields" class="mode" hidden>
+            <div>
+              <label for="ipv6">本机公网 IPv6</label>
+              <div class="field-row">
+                <input
+                  class="mono"
+                  id="ipv6"
+                  placeholder="例如 240e:…"
+                  autocomplete="off"
+                /><button id="detect">获取 IPv6</button>
+              </div>
+            </div>
+            <div id="ipv6Tip" class="feedback" role="status">
+              检测本机网卡，也可手动输入。
+            </div>
+          </div>
+          <div class="pair">
+            <div>
+              <label for="size">分辨率</label
+              ><select id="size">
+                <option>720p</option>
+                <option>1080p</option>
+              </select>
+            </div>
+            <div>
+              <label for="fps">目标帧率</label
+              ><select id="fps">
+                <option>10 FPS</option>
+                <option>15 FPS</option>
+                <option>20 FPS</option>
+                <option selected>30 FPS</option>
+              </select>
+            </div>
+          </div>
+          <label id="permission"
+            ><input id="control" type="checkbox" />
+            允许手机控制键盘和鼠标</label
+          >
+        </section>
+        <section class="panel stack session">
+          <h2 class="section-title">会话状态</h2>
+          <div class="preview" aria-hidden="true">
+            <div class="monitor"></div>
+          </div>
+          <div>
+            <strong
+              ><i class="dot"></i
+              ><span id="state" role="status">等待连接</span></strong
+            >
+            <p id="detail">填写接收设备地址后开始投屏。</p>
+          </div>
+          <div class="stack actions">
+            <button class="primary" id="start">开始投屏</button>
+            <button id="revoke" hidden>撤销键鼠控制</button>
+            <section id="pairing" class="stack" hidden>
+              <button id="copy" disabled>复制配对码</button
+              ><label
+                ><input id="reset" type="checkbox" /> 下次启动时重置配对</label
+              >
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let remote = false,
+      active = false,
+      found = true,
+      revision = 0;
+    function refresh() {
+      $("lan").setAttribute("aria-pressed", !remote);
+      $("remote").setAttribute("aria-pressed", remote);
+      $("localFields").hidden = remote;
+      $("remoteFields").hidden = $("pairing").hidden = !remote;
+      const jpeg = !remote && $("codec").selectedIndex === 1;
+      $("size").disabled = active || jpeg;
+      $("permission").hidden = jpeg;
+      $("start").textContent = active
+        ? "停止投屏"
+        : remote
+          ? "开启远程接入"
+          : "开始投屏";
+      $("copy").disabled = !active;
+      $("revoke").hidden = !active || !$("control").checked;
+      for (const id of [
+        "lan",
+        "remote",
+        "receiver",
+        "ipv6",
+        "detect",
+        "codec",
+        "fps",
+        "control",
+        "reset",
+      ])
+        $(id).disabled = active;
+      $("detail").textContent = active
+        ? remote
+          ? "在手机上连接这台电脑。"
+          : "等待手机或电视接受投屏。"
+        : remote
+          ? "填写本机公网 IPv6 后开启接入。"
+          : "填写接收设备地址后开始投屏。";
+    }
+    $("lan").onclick = () => {
+      remote = false;
+      ++revision;
+      refresh();
+    };
+    $("remote").onclick = () => {
+      remote = true;
+      refresh();
+    };
+    $("codec").onchange = refresh;
+    $("scenario").onclick = () => {
+      found = !found;
+      $("scenario").setAttribute("aria-pressed", found);
+      $("scenario").textContent =
+        "检测示例 · " + (found ? "找到地址" : "无可用地址");
+    };
+    $("ipv6").oninput = () => ++revision;
+    $("detect").onclick = () => {
+      const token = ++revision,
+        success = found;
+      $("ipv6Tip").classList.remove("error");
+      $("ipv6Tip").textContent = "正在检测…";
+      $("detect").disabled = true;
+      setTimeout(() => {
+        $("detect").disabled = active;
+        if (token !== revision || active || !remote) {
+          $("ipv6Tip").textContent = "检测已取消";
+          return;
+        }
+        if (success) $("ipv6").value = "2001:db8:42:21::12";
+        $("ipv6Tip").classList.toggle("error", !success);
+        $("ipv6Tip").textContent = success
+          ? "已填入本机 IPv6 · 以太网（演示地址）"
+          : "未找到公网 IPv6，请检查网络或手动输入。";
+      }, 450);
+    };
+    $("start").onclick = () => {
+      const address = $(remote ? "ipv6" : "receiver");
+      if (!active && !address.value.trim()) {
+        address.focus();
+        $("state").textContent = "请填写地址";
+        return;
+      }
+      active = !active;
+      if (!active) $("control").checked = false;
+      $("state").textContent = active
+        ? remote
+          ? "远程接入已开启"
+          : "正在连接接收设备…"
+        : "投屏已停止";
+      refresh();
+    };
+    $("revoke").onclick = () => {
+      $("control").checked = false;
+      refresh();
+    };
+    $("copy").onclick = () => ($("state").textContent = "配对码已复制（演示）");
+    refresh();
+  </script>
 </html>
