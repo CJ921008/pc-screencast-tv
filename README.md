@@ -1,6 +1,6 @@
 # VanJScreen
 
-当前版本 **0.6.1**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频和系统声音，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
+当前版本 Windows **0.6.2**、Android **0.6.1**：Windows 主显示器 → Android 手机/Android TV，支持局域网投屏和手机主动连接的公网 IPv6 远程接入。默认 H.264/WebRTC 视频和系统声音，720p30，支持选择 1080p30。手机可在 Windows 授权后操作键盘和鼠标。硬件编码不可用时降到软件 H.264/720p，JPEG 兼容模式可在局域网手动选择。
 
 ## 目录
 
@@ -41,12 +41,10 @@ GitHub Actions 的 `VanJScreen-Windows-x64-MSIX` 产物包含 Release 安装包�
 
 ```powershell
 Import-Certificate -FilePath .\VanJScreen-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
-Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.appx
-Add-AppxPackage .\Dependencies\x64\Microsoft.VCLibs.x64.14.00.Desktop.appx -ForceApplicationShutdown
-Add-AppxPackage .\VanJScreen-x64.msix
+Add-AppxPackage -Path .\VanJScreen-x64.msix
 ```
 
-每次 CI 都生成新的测试签名证书。升级先前 CI 安装的 Windows 包前，先在 PowerShell 执行 `Get-AppxPackage LANScreenCast.Sender | Remove-AppxPackage`，再导入本次产物的证书并安装。证书仅用于此测试版；安装前应核对证书来源。旧的 `LANScreenCast-Windows-x64-debug` 是开发构建，不能当安装程序运行。
+每次 CI 都生成新的测试签名证书。覆盖升级前先退出正在运行的 VanJScreen，并导入本次产物的证书。如果报错明确提示缺少某项 `Microsoft.VCLibs`，安装 `Dependencies\x64` 目录中对应的包后重试。覆盖升级会保留 Windows 端的配对状态。
 
 ## Android TV 构建与运行
 
@@ -82,7 +80,7 @@ H.264 信令地址为 `ws://IP:47475/signaling`；局域网 ICE 使用动态 UDP
 
 ### 公网 IPv6 远程接入
 
-1. 在 Windows 和手机安装 0.6.1。电脑保持开机、登录且桌面可用。在 Windows 选择 **公网 IPv6**，点击 **获取 IPv6** 自动填入这台电脑的公网 IPv6，或手动填写地址，再点 **开启远程接入**。需要操作键鼠时，在开始前勾选键鼠授权。
+1. 安装 Windows 和手机各自的最新版。电脑保持开机、登录且桌面可用。在 Windows 选择 **公网 IPv6**，点击 **获取 IPv6** 自动填入这台电脑的公网 IPv6，或手动填写地址，再点 **开启远程接入**。需要操作键鼠时，在开始前勾选键鼠授权。
 2. 家庭路由器的 IPv6 入站规则和 Windows 防火墙需允许到此电脑的 **TCP 47476**（加密信令）和 **UDP 47500–47509**（音视频与控制）。管理员 PowerShell 可用以下命令设置 Windows 防火墙。替换为电脑的实际地址。
 
 ```powershell

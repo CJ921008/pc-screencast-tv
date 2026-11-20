@@ -4,11 +4,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid x:Name="LayoutRoot" RequestedTheme="Dark" Background="#101614">
         <Grid.Resources>
-            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#9CEBBD" />
-            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#B3F3CC" />
-            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#80CAA0" />
-            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#102318" />
-            <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#102318" />
             <SolidColorBrush x:Key="MutedTextBrush" Color="#B3C5BB" />
             <SolidColorBrush x:Key="MintBrush" Color="#9CEBBD" />
             <Style x:Key="Panel" TargetType="Border">
@@ -112,7 +107,7 @@
                             </StackPanel>
                             <Grid>
                                 <Button x:Name="StartButton" Content="开始投屏" MinHeight="44" HorizontalAlignment="Stretch"
-                                        Style="{StaticResource AccentButtonStyle}" Click="Start_Click" />
+                                        Background="{StaticResource MintBrush}" Foreground="#102318" Click="Start_Click" />
                                 <Button x:Name="StopButton" Content="停止投屏" MinHeight="44" HorizontalAlignment="Stretch"
                                         Click="Stop_Click" Visibility="Collapsed" />
                             </Grid>

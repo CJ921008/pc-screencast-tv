@@ -117,6 +117,10 @@ jobs:
           Import-Certificate -FilePath (Join-Path $output 'VanJScreen-Test.cer') -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
           & $signTool.FullName verify /pa /v $msix
           if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $LASTEXITCODE" }
+      - name: Verify the installed app opens its main window
+        shell: pwsh
+        timeout-minutes: 3
+        run: ./windows/tests/Check-InstalledApp.ps1 -PackageDirectory windows-package
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
