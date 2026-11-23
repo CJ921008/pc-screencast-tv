@@ -2,22 +2,17 @@ package com.lanscreencast.tv
 
 import android.graphics.Bitmap
 import android.app.AlertDialog
-import android.hardware.input.InputManager
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.media.AudioManager
 import android.os.Bundle
 import android.os.SystemClock
-import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.SurfaceView
-import android.widget.Toast
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,13 +29,6 @@ class MainActivity : ComponentActivity() {
     private var casting by mutableStateOf(false)
     private var rtcCasting by mutableStateOf(false)
     private var control by mutableStateOf<ControlView?>(null)
-    private var gamepadName by mutableStateOf<String?>(null)
-    private var gamepadStatus by mutableStateOf(GamepadStatus())
-    private var padKeyboard by mutableStateOf<GamepadKeyboardState?>(null)
-    private var foreground = false
-    private var windowFocused = false
-    private var waitForGame = false
-    private lateinit var controller: ControllerInput
     private var direct by mutableStateOf(false)
     private var dragging by mutableStateOf(false)
     private var remoteActive by mutableStateOf(false)
@@ -77,11 +65,7 @@ class MainActivity : ComponentActivity() {
             } },
             onStatus = { value, active -> runOnUiThread {
                 status = value; rtcCasting = active
-                if (!active) {
-                    requestDialog?.dismiss()
-                    closePadKeyboard()
-                }
-                updateController()
+                if (!active) requestDialog?.dismiss()
                 showFullscreen(rtcCasting || casting)
             } },
             onControl = { value -> runOnUiThread {
@@ -90,32 +74,14 @@ class MainActivity : ComponentActivity() {
                     direct = false
                     dragging = false
                     keyboardDialog?.dismiss()
-                    closePadKeyboard()
                 }
-                updateController()
             } },
             onRemoteState = { active -> runOnUiThread {
                 remoteActive = active
                 if (!active) remoteDevice = RemoteDevice.load(this)
             } },
             onAudioState = { value -> runOnUiThread { audioState = value } },
-            onGamepadState = { value -> runOnUiThread {
-                waitForGame = false
-                gamepadStatus = value
-                updateController()
-                value.message?.let(::notice)
-            } },
         )
-        controller = ControllerInput(
-            getSystemService(InputManager::class.java),
-            rtcReceiver::sendControl, rtcReceiver::setGamepadAxes, rtcReceiver::sendGamepadButtons,
-            ::padKey, ::openPadKeyboard, ::startPadGame, rtcReceiver::stopGamepad,
-        ) { name ->
-            gamepadName = name
-            if (name == null) closePadKeyboard()
-            updateController()
-        }
-        controller.register()
         rtcReceiver.start()
         receiver = ScreenReceiver(
             this,
@@ -134,31 +100,22 @@ class MainActivity : ComponentActivity() {
             CastTheme {
                 BackHandler(enabled = remoteActive) { rtcReceiver.disconnectRemote() }
                 if (rtcCasting) {
-                    Box(Modifier.fillMaxSize()) {
-                        ControlledVideo(rtcReceiver, status == "正在建立视频连接", control, direct, dragging,
-                            onMode = { dragging = false; direct = !direct },
-                            onDrag = { dragging = it },
-                            onText = {
-                                keyboardDialog = textInputDialog(this@MainActivity) { rtcReceiver.sendControl(it) }.also { it.show() }
-                            },
-                            onShortcuts = {
-                                keyboardDialog = shortcutDialog(this@MainActivity) { rtcReceiver.sendControl(it) }.also { it.show() }
-                            },
-                            onDisconnect = if (remoteActive) rtcReceiver::disconnectRemote else null,
-                            audioState = audioState,
-                            onAudioToggle = {
-                                val current = audioState
-                                rtcReceiver.setAudioMuted(current != null && !current.muted && !current.interrupted)
-                            },
-                            gamepadName = gamepadName,
-                            gamepadStatus = gamepadStatus,
-                            onGamepadToggle = if (gamepadStatus.inGame) rtcReceiver::stopGamepad else ::startPadGame,
-                            onPadKeyboard = ::openPadKeyboard,
-                            touchEnabled = padKeyboard == null && !gamepadStatus.inGame,
-                        )
-                        padKeyboard?.let { GamepadKeyboard(it, ::selectPadKey, ::closePadKeyboard) }
-                    }
-                    BackHandler(enabled = padKeyboard != null) { closePadKeyboard() }
+                    ControlledVideo(rtcReceiver, status == "正在建立视频连接", control, direct, dragging,
+                        onMode = { dragging = false; direct = !direct },
+                        onDrag = { dragging = it },
+                        onText = {
+                            keyboardDialog = textInputDialog(this) { rtcReceiver.sendControl(it) }.also { it.show() }
+                        },
+                        onShortcuts = {
+                            keyboardDialog = shortcutDialog(this) { rtcReceiver.sendControl(it) }.also { it.show() }
+                        },
+                        onDisconnect = if (remoteActive) rtcReceiver::disconnectRemote else null,
+                        audioState = audioState,
+                        onAudioToggle = {
+                            val current = audioState
+                            rtcReceiver.setAudioMuted(current != null && !current.muted && !current.interrupted)
+                        },
+                    )
                 } else if (casting) {
                     AndroidView(
                         factory = { context -> SurfaceView(context).also { surfaceView = it } },
@@ -182,91 +139,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    private fun notice(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun updateController() {
-        if (!::controller.isInitialized) return
-        val target = when {
-            !foreground || !windowFocused || !rtcCasting || gamepadName == null -> ControllerInput.Target.NONE
-            padKeyboard != null -> ControllerInput.Target.KEYBOARD
-            waitForGame -> ControllerInput.Target.TRANSITION
-            gamepadStatus.mode == GamepadMode.GAME -> ControllerInput.Target.GAME
-            gamepadStatus.inGame -> ControllerInput.Target.TRANSITION
-            control != null || gamepadStatus.mode == GamepadMode.DESKTOP -> ControllerInput.Target.DESKTOP
-            else -> ControllerInput.Target.NONE
-        }
-        controller.setTarget(target)
-    }
-
-    private fun startPadGame() {
-        if (waitForGame || gamepadStatus.inGame) return
-        if (gamepadName == null) {
-            notice("请先在安卓上连接手柄")
-            return
-        }
-        if (gamepadStatus.mode != GamepadMode.DESKTOP) {
-            notice("此投屏会话未启用手柄游戏模式")
-            return
-        }
-        closePadKeyboard()
-        dragging = false
-        waitForGame = true
-        updateController()
-        rtcReceiver.startGamepad()
-    }
-
-    private fun openPadKeyboard() {
-        if (control == null) {
-            notice("请在 Windows 启用远程控制")
-            return
-        }
-        if (padKeyboard != null || gamepadStatus.inGame || waitForGame) return
-        dragging = false
-        padKeyboard = GamepadKeyboardState()
-        updateController()
-    }
-
-    private fun closePadKeyboard() {
-        if (padKeyboard == null) return
-        padKeyboard = null
-        updateController()
-    }
-
-    private fun padKey(code: Int) {
-        val keyboard = padKeyboard ?: return
-        when (code) {
-            KeyEvent.KEYCODE_BUTTON_A -> selectPadKey(keyboard.selected)
-            KeyEvent.KEYCODE_BUTTON_B -> closePadKeyboard()
-            KeyEvent.KEYCODE_BUTTON_X -> selectPadKey("退格")
-            else -> padKeyboard = keyboard.move(code)
-        }
-    }
-
-    private fun selectPadKey(label: String) {
-        val keyboard = padKeyboard ?: return
-        when (label) {
-            "关闭" -> closePadKeyboard()
-            "大写", "小写" -> padKeyboard = keyboard.copy(upper = !keyboard.upper)
-            "字母", "符号" -> padKeyboard = keyboard.copy(symbols = !keyboard.symbols)
-            else -> rtcReceiver.sendControl(gamepadKeyboardMessage(label))
-        }
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-        (::controller.isInitialized && controller.key(event)) || super.dispatchKeyEvent(event)
-
-    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean =
-        (::controller.isInitialized && controller.motion(event)) || super.dispatchGenericMotionEvent(event)
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        windowFocused = hasFocus
-        if (!hasFocus && ::rtcReceiver.isInitialized) rtcReceiver.stopGamepad()
-        updateController()
     }
 
     private fun drawFrame(bitmap: Bitmap) {
@@ -312,7 +184,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        controller.close()
         receiver.stop()
         requestDialog?.dismiss()
         keyboardDialog?.dismiss()
@@ -324,17 +195,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        foreground = true
-        updateController()
         rtcReceiver.setControlForeground(true)
         rtcReceiver.setAudioForeground(true)
     }
 
     override fun onPause() {
-        foreground = false
-        updateController()
-        closePadKeyboard()
-        rtcReceiver.stopGamepad()
         rtcReceiver.setControlForeground(false)
         rtcReceiver.setAudioForeground(false)
         dragging = false

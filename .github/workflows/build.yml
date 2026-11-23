@@ -59,7 +59,7 @@ jobs:
           path: |
             .vcpkg-bincache
             .vcpkg/downloads
-          key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json', 'windows/vcpkg-configuration.json', 'windows/ports/**') }}
+          key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json') }}
           restore-keys: windows-vcpkg-
       - name: Install native media dependencies
         shell: pwsh
@@ -72,7 +72,7 @@ jobs:
           path: |
             .vcpkg-bincache
             .vcpkg/downloads
-          key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json', 'windows/vcpkg-configuration.json', 'windows/ports/**') }}
+          key: windows-vcpkg-${{ hashFiles('windows/vcpkg.json') }}
       - name: Build Release MSIX
         shell: pwsh
         run: msbuild windows/LANScreenCast.sln /restore /m /p:Configuration=Release /p:Platform=x64 /p:GenerateAppxPackageOnBuild=true /p:AppxPackageSigningEnabled=false /p:AppxBundle=Never

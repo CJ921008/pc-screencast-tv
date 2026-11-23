@@ -18,7 +18,6 @@ struct RemoteIdentity {
 
 void ServeRemoteWebRtc(std::wstring const& ipv6, std::filesystem::path const& identityPath, bool resetPairing,
     VideoSettings settings, std::atomic_bool const& stop, std::shared_ptr<std::atomic_bool> controlPermission,
-    std::shared_ptr<std::atomic_bool> gamepadPermission,
     std::function<void(std::wstring const&)> const& onStatus,
     std::function<void(std::wstring const&)> const& onPairingCode);
 }

@@ -1,11 +1,10 @@
-# Third-party dependencies
+# Third-party dependencies in 0.3.0
 
 The Windows build uses vcpkg baseline 2750401336fb7c95f6619657a46a7e798661341c and x64-windows-static-md. libdatachannel is overridden to 0.24.5 with WebSocket and SRTP support; transitive versions are locked by the baseline.
 
 | Component | Version | License / source |
 |---|---|---|
 | libdatachannel | 0.24.5 | MPL-2.0, https://github.com/paullouisageneau/libdatachannel/tree/v0.24.5 |
-| ViGEmClient | 1.21.222.0 | MIT, https://github.com/nefarius/ViGEmClient/tree/b66d02d57e32cc8595369c53418b843e958649b4 |
 | libopus | vcpkg baseline | BSD-3-Clause, https://opus-codec.org/license/ |
 | libjuice, libsrtp, usrsctp, OpenSSL, plog, nlohmann-json | vcpkg baseline | Each package's upstream license is included under licenses in the Windows CI artifact |
 | WebRTC Android SDK | 144.7559.15 | WebRTC BSD-style license and bundled third-party licenses, https://github.com/webrtc-sdk/android/releases/tag/v144.7559.15 |
@@ -16,5 +15,3 @@ The Windows build uses vcpkg baseline 2750401336fb7c95f6619657a46a7e798661341c a
 libdatachannel is statically linked without modifying its source. Its source and license are available at the pinned upstream tag. Android WebRTC uses the published org.webrtc AAR; it is a community-maintained precompiled distribution, not a Google Maven artifact. H.264 encoder/decoder implementations come from the operating system/device codec providers.
 
 The Windows artifact includes this file and the copyright/license files supplied by every installed vcpkg package. Android dependency source/license references are also included as an APK asset.
-
-ViGEmClient is statically linked. The optional ViGEmBus driver is installed separately from the official release.

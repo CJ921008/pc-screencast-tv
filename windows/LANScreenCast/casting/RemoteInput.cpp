@@ -121,17 +121,10 @@ void RemoteInput::Close() {
     ReleaseLocked();
 }
 
-void RemoteInput::SuspendForGamepad(bool active) {
-    std::lock_guard lock(mutex);
-    gamepadActive = active;
-    expires = {};
-    ReleaseLocked();
-}
-
 void RemoteInput::Receive(std::string_view raw) {
     if (raw.empty() || raw.size() > 4096 || !*permission) return;
     std::lock_guard lock(mutex);
-    if (closed || gamepadActive || !*permission) return;
+    if (closed || !*permission) return;
 
     try {
         auto message = json::parse(raw);

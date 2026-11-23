@@ -75,7 +75,6 @@
     <ClInclude Include="casting\WebRtcSender.h" />
     <ClInclude Include="casting\SignalProtocol.h" />
     <ClInclude Include="casting\RemoteInput.h" />
-    <ClInclude Include="casting\RemoteGamepad.h" />
     <ClInclude Include="casting\RemoteAccess.h" />
     <ClInclude Include="casting\LocalIPv6.h" />
   </ItemGroup>
@@ -93,8 +92,6 @@
     <ClCompile Include="casting\AudioPipeline.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\WebRtcSender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteInput.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="casting\RemoteGamepad.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
-    <ClCompile Include="casting\XboxGamepad.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteAccess.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\LocalIPv6.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="casting\RemoteIdentity.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>

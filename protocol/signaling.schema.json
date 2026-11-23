@@ -91,9 +91,6 @@
             },
             "opus": {
               "type": "boolean"
-            },
-            "gamepad": {
-              "type": "boolean"
             }
           },
           "required": [

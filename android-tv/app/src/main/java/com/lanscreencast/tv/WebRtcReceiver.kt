@@ -1,6 +1,7 @@
 package com.lanscreencast.tv
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaCodecList
 import com.lanscreencast.tv.logging.FileLogger
 import org.java_websocket.WebSocket
@@ -25,7 +26,6 @@ internal class WebRtcReceiver(
     private val onControl: (ControlView?) -> Unit,
     private val onRemoteState: (Boolean) -> Unit,
     private val onAudioState: (AudioPlaybackState?) -> Unit,
-    onGamepadState: (GamepadStatus) -> Unit,
 ) {
     companion object { const val PORT = 47475 }
     private val worker = Executors.newSingleThreadScheduledExecutor()
@@ -37,12 +37,7 @@ internal class WebRtcReceiver(
     private var remoteClient: RemoteConnection? = null
     @Volatile private var control: DataChannel? = null
     @Volatile private var controlForeground = false
-    private val gamepadLink = GamepadLink(worker, ::dispatch) { status ->
-        if (controlForeground && status.mode == GamepadMode.DESKTOP) {
-            control?.let { writeControl(it, "{\"type\":\"resume\"}") }
-        }
-        onGamepadState(status)
-    }
+    private val hasTouchscreen = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
     private var session = ""
     private val state = SignalState()
     private var lastAlive = 0L
@@ -311,7 +306,7 @@ internal class WebRtcReceiver(
         acceptedAt = System.currentTimeMillis()
         deadline = acceptedAt + if (conn === remoteClient) 11000 else 10000
         val capabilities = JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
-            .put("supports1080p30", supports1080).put("remoteInput", true).put("gamepad", true)
+            .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen)
         if (supportsOpus) capabilities.put("opus", true)
         send(conn, "capabilities", capabilities)
         onStatus("正在建立视频连接", true)
@@ -336,10 +331,10 @@ internal class WebRtcReceiver(
             override fun onAddStream(value: MediaStream) {}
             override fun onRemoveStream(value: MediaStream) {}
             override fun onDataChannel(value: DataChannel) { dispatch {
-                when {
-                    epoch != generation -> value.dispose()
-                    control == null && value.label() == "lsc-input-v1" -> attachControl(value)
-                    !gamepadLink.attach(value) -> value.dispose()
+                if (epoch == generation && hasTouchscreen && control == null && value.label() == "lsc-input-v1") {
+                    attachControl(value)
+                } else {
+                    value.dispose()
                 }
             } }
             override fun onRenegotiationNeeded() {}
@@ -409,14 +404,6 @@ internal class WebRtcReceiver(
             if (control === channel) writeControl(channel, if (active) "{\"type\":\"resume\"}" else "{\"type\":\"pause\"}")
         }
     }
-
-    fun startGamepad() = dispatch { if (controlForeground) gamepadLink.start() }
-
-    fun stopGamepad() = dispatch { gamepadLink.stop() }
-
-    fun setGamepadAxes(axes: GamepadAxes) = gamepadLink.setAxes(axes)
-
-    fun sendGamepadButtons(buttons: Int) = dispatch { if (controlForeground) gamepadLink.buttons(buttons) }
 
     fun setAudioForeground(active: Boolean) = dispatch { audioPlayback.setForeground(active) }
 
@@ -521,7 +508,6 @@ internal class WebRtcReceiver(
     private fun end(message: String) {
         ++generation
         closeControl()
-        gamepadLink.close()
         audioPlayback.clear()
         val old = socket
         val remote = remoteClient

@@ -19,7 +19,6 @@ public:
     ~RemoteInput();
     void Receive(std::string_view message);
     void Expire(Clock::time_point now);
-    void SuspendForGamepad(bool active);
     void Close();
     bool InputBlocked() const { return blocked.load(); }
 
@@ -34,7 +33,6 @@ private:
     std::mutex mutex;
     Clock::time_point expires{};
     bool closed = false;
-    bool gamepadActive = false;
     bool dragging = false;
     std::atomic_bool blocked{false};
 };

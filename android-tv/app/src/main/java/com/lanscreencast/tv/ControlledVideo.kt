@@ -60,19 +60,13 @@ internal fun ControlledVideo(
     onDisconnect: (() -> Unit)?,
     audioState: AudioPlaybackState?,
     onAudioToggle: () -> Unit,
-    gamepadName: String?,
-    gamepadStatus: GamepadStatus,
-    onGamepadToggle: () -> Unit,
-    onPadKeyboard: () -> Unit,
-    touchEnabled: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val tv = remember(context) { context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
     val openFocus = remember { FocusRequester() }
     val closeFocus = remember { FocusRequester() }
-    val hasActions = control != null || audioState != null || onDisconnect != null ||
-        gamepadStatus.mode != GamepadMode.UNAVAILABLE
+    val hasActions = control != null || audioState != null || onDisconnect != null
     val showMenu = hasActions && menuOpen
 
     LaunchedEffect(hasActions, showMenu) {
@@ -89,7 +83,7 @@ internal fun ControlledVideo(
                 onRelease = { receiver.releaseRenderer(it) },
                 modifier = Modifier.matchParentSize(),
             )
-            if (control != null && touchEnabled) {
+            if (control != null) {
                 AndroidView(
                     factory = { RemoteTouchView(it, receiver::sendControl) { onDrag(false) } },
                     update = { it.update(control, direct, dragging) },
@@ -126,30 +120,7 @@ internal fun ControlledVideo(
                             Text("投屏控制", color = CastText, style = MaterialTheme.typography.titleMedium)
                             MenuIcon("×", "收起投屏控制", Modifier.focusRequester(closeFocus)) { menuOpen = false }
                         }
-                        gamepadName?.let {
-                            Text(it, color = CastMint, style = MaterialTheme.typography.bodySmall)
-                            val hint = when {
-                                gamepadStatus.inGame -> "同时按住 Start 和 Select 返回桌面"
-                                control != null -> "左摇杆移动 · 右摇杆滚动 · A 左键 · B 右键 · Select 键盘"
-                                gamepadStatus.mode == GamepadMode.DESKTOP -> "按 Start 进入游戏模式"
-                                else -> null
-                            }
-                            hint?.let { Text(it, color = CastMuted, style = MaterialTheme.typography.bodySmall) }
-                        }
-                        when (gamepadStatus.mode) {
-                            GamepadMode.DESKTOP -> CastAction("进入游戏模式", {
-                                menuOpen = false
-                                onGamepadToggle()
-                            }, Modifier.fillMaxWidth())
-                            GamepadMode.GAME -> CastAction("返回桌面模式", {
-                                menuOpen = false
-                                onGamepadToggle()
-                            }, Modifier.fillMaxWidth())
-                            GamepadMode.STARTING -> Text("正在连接 Windows 手柄…", color = CastMuted)
-                            GamepadMode.STOPPING -> Text("正在返回桌面…", color = CastMuted)
-                            else -> Unit
-                        }
-                        if (control != null && !gamepadStatus.inGame) {
+                        if (control != null) {
                             Text(
                                 when {
                                     control.blocked -> "Windows 未接受上一次输入"
@@ -163,10 +134,6 @@ internal fun ControlledVideo(
                             CastAction(if (dragging) "松开" else "拖拽", {
                                 onDrag(!dragging)
                                 menuOpen = false
-                            }, Modifier.fillMaxWidth())
-                            if (gamepadName != null) CastAction("手柄键盘", {
-                                menuOpen = false
-                                onPadKeyboard()
                             }, Modifier.fillMaxWidth())
                             CastAction("输入文字", { menuOpen = false; onText() }, Modifier.fillMaxWidth())
                             CastAction("快捷键", { menuOpen = false; onShortcuts() }, Modifier.fillMaxWidth())
