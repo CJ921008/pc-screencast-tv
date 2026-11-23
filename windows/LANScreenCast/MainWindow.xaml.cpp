@@ -37,6 +37,7 @@ namespace winrt::LANScreenCast::implementation
         Closed([this](auto const&, auto const&) {
             ++m_lookupGeneration;
             *m_controlPermission = false;
+            *m_gamepadPermission = false;
             m_stop = true;
         });
     }
@@ -44,6 +45,7 @@ namespace winrt::LANScreenCast::implementation
     MainWindow::~MainWindow()
     {
         *m_controlPermission = false;
+        *m_gamepadPermission = false;
         m_stop = true;
         if (m_worker.joinable()) m_worker.join();
     }
@@ -77,9 +79,11 @@ namespace winrt::LANScreenCast::implementation
         FrameRate().IsEnabled(!running);
         AllowRemoteInput().Visibility(visible(!jpeg));
         AllowRemoteInput().IsEnabled(!running);
+        AllowGamepad().Visibility(visible(!jpeg));
+        AllowGamepad().IsEnabled(!running);
         ResetPairing().IsEnabled(!running);
         CopyPairingButton().IsEnabled(running && !m_stop && !m_pairingCode.empty());
-        RevokeInputButton().Visibility(visible(running && *m_controlPermission));
+        RevokeInputButton().Visibility(visible(running && (*m_controlPermission || *m_gamepadPermission)));
         if (m_remoteMode) {
             StatusHint().Text(running ? L"在手机上打开接收器，连接这台电脑。" :
                 L"填写本机公网 IPv6 后开启接入。");
@@ -211,6 +215,8 @@ namespace winrt::LANScreenCast::implementation
             identityPath = std::filesystem::path(winrt::Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"remote-identity.bin";
         auto checked = AllowRemoteInput().IsChecked();
         *m_controlPermission = rtcMode && checked && checked.Value();
+        auto gamepad = AllowGamepad().IsChecked();
+        *m_gamepadPermission = rtcMode && gamepad && gamepad.Value();
         ::LANScreenCast::casting::VideoSettings settings;
         settings.fps = targetFps;
         if (Resolution().SelectedIndex() == 1) { settings.width = 1920; settings.height = 1080; settings.bitrate = 8000000; }
@@ -243,10 +249,10 @@ namespace winrt::LANScreenCast::implementation
                             }
                         });
                     };
-                    ::LANScreenCast::casting::ServeRemoteWebRtc(ip, identityPath, resetPairing, settings, m_stop, m_controlPermission, update, pairing);
+                    ::LANScreenCast::casting::ServeRemoteWebRtc(ip, identityPath, resetPairing, settings, m_stop, m_controlPermission, m_gamepadPermission, update, pairing);
                     finalStatus = L"远程接入已关闭";
                 }
-                else if (rtcMode) ::LANScreenCast::casting::StreamWebRtc(ip, settings, m_stop, m_controlPermission, update);
+                else if (rtcMode) ::LANScreenCast::casting::StreamWebRtc(ip, settings, m_stop, m_controlPermission, m_gamepadPermission, update);
                 else ::LANScreenCast::casting::StreamDesktop(ip, targetFps, m_stop, update);
                 ::LANScreenCast::logging::FileLogger::Write(L"INFO", L"CAST", L"STOPPED", L"Sender stopped");
             }
@@ -256,12 +262,14 @@ namespace winrt::LANScreenCast::implementation
                 ::LANScreenCast::logging::FileLogger::Write(L"ERROR", L"CAST", L"FAILED", finalStatus);
             }
             *m_controlPermission = false;
+            *m_gamepadPermission = false;
             m_running = false;
             dispatcher.TryEnqueue([weak, text = winrt::hstring(finalStatus)]()
             {
                 if (auto self = weak.get()) {
                     self->m_pairingCode = winrt::hstring{};
                     self->AllowRemoteInput().IsChecked(winrt::box_value(false).as<winrt::Windows::Foundation::IReference<bool>>());
+                    self->AllowGamepad().IsChecked(winrt::box_value(false).as<winrt::Windows::Foundation::IReference<bool>>());
                     self->SetStatus(text, false);
                 }
             });
@@ -272,6 +280,7 @@ namespace winrt::LANScreenCast::implementation
         Microsoft::UI::Xaml::RoutedEventArgs const&)
     {
         *m_controlPermission = false;
+        *m_gamepadPermission = false;
         m_stop = true;
         SetStatus(L"正在停止…", true);
     }
@@ -280,7 +289,9 @@ namespace winrt::LANScreenCast::implementation
         Microsoft::UI::Xaml::RoutedEventArgs const&)
     {
         *m_controlPermission = false;
+        *m_gamepadPermission = false;
         AllowRemoteInput().IsChecked(winrt::box_value(false).as<winrt::Windows::Foundation::IReference<bool>>());
+        AllowGamepad().IsChecked(winrt::box_value(false).as<winrt::Windows::Foundation::IReference<bool>>());
         RevokeInputButton().Visibility(Visibility::Collapsed);
     }
 

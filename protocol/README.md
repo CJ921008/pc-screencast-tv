@@ -21,3 +21,15 @@ stats reports actual rendered fps, received bitrate (bits/second), RTT (millisec
 Android opens `wss://[WINDOWS_IPV6]:47476/remote`. The pairing code is `LSC1.<certificate SHA-256>.<random token>` using unpadded base64url for the two 32-byte fields. Android validates the exact certificate pin during TLS before sending a text JSON message with `type: "remote_auth"`, `version: 1` and `token`. On acceptance, Windows sends the existing v2 `hello` and both endpoints reuse v2 signaling on that socket. On rejection, Windows may send a `remote_error` object with `version: 1` and a `code` such as `PAIRING_REQUIRED` or `BUSY` before closing. Only one authenticated session is active at a time.
 
 Windows binds the public IPv6 entered by the user, including for the host ICE candidates in UDP 47500–47509. Data channel control requires a separate permission on Windows. The access token and certificate private key are protected using Windows DPAPI. Resetting pairing rotates the certificate and the token.
+
+
+## Android controller
+
+Android advertises the optional boolean `gamepad` capability. Windows opens the gamepad channels only when the receiver advertises support and the user enables controller play. Desktop mouse and keyboard continue using `lsc-input-v1` with their own permission. All channels share the media PeerConnection.
+
+| Channel | Delivery | Messages |
+|---|---|---|
+| `lsc-gamepad-v1` | Ordered and reliable | Android sends `start`, `buttons` and `stop`. Windows returns `gamepad_status` with `state` set to `active`, `stopped`, `expired`, `not_allowed` or `driver_unavailable`. |
+| `lsc-gamepad-axes-v1` | Unordered, zero retransmissions | Android periodically sends `axes` with `sequence` and `axes: [lx, ly, rx, ry, lt, rt]`. The sticks are signed 16-bit integers with positive Y upward. The triggers are unsigned 8-bit integers. |
+
+Send JSON text up to 512 bytes per message. Every message carries a `type` and a positive uint32 `epoch`. Android uses a fresh, increasing epoch for every attempt to enter game mode, and starts sending controller reports only after `active` for that epoch. The `buttons` field is the full XInput button bitmask. Axes use increasing positive uint32 sequence numbers within an epoch. Windows keeps the latest valid axes and button state independently. After 500 ms without a newer axis report Windows releases the controller state and ends the epoch; a new start is required to resume. Stopping, revoking permission, or closing a channel releases controller state. While game mode is active Windows suspends remote mouse and keyboard injection.

@@ -89,7 +89,10 @@
                                 </ComboBox>
                             </Grid>
                             <CheckBox x:Name="AllowRemoteInput">
-                                <TextBlock Text="允许手机控制键盘和鼠标" TextWrapping="Wrap" />
+                                <TextBlock Text="允许安卓控制键盘和鼠标" TextWrapping="Wrap" />
+                            </CheckBox>
+                            <CheckBox x:Name="AllowGamepad">
+                                <TextBlock Text="允许安卓手柄玩游戏" TextWrapping="Wrap" />
                             </CheckBox>
                         </StackPanel>
                     </Border>
@@ -111,7 +114,7 @@
                                 <Button x:Name="StopButton" Content="停止投屏" MinHeight="44" HorizontalAlignment="Stretch"
                                         Click="Stop_Click" Visibility="Collapsed" />
                             </Grid>
-                            <Button x:Name="RevokeInputButton" Content="撤销键鼠控制" HorizontalAlignment="Stretch"
+                            <Button x:Name="RevokeInputButton" Content="撤销键鼠和手柄控制" HorizontalAlignment="Stretch"
                                     Click="RevokeInput_Click" Visibility="Collapsed" />
                             <StackPanel x:Name="PairingPanel" Spacing="8" Visibility="Collapsed">
                                 <Button x:Name="CopyPairingButton" Content="复制配对码" HorizontalAlignment="Stretch"

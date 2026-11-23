@@ -20,7 +20,9 @@ samples = {
 for kind, payload in samples.items():
     validator.validate(dict(base, type=kind, payload=dict(sessionId=session, **payload)))
 validator.validate(dict(base, type="capabilities",
-    payload=dict(sessionId=session, remoteInput=True, **samples["capabilities"])))
+    payload=dict(sessionId=session, remoteInput=True, gamepad=True, **samples["capabilities"])))
+assert list(validator.iter_errors(dict(base, type="capabilities",
+    payload=dict(sessionId=session, gamepad="true", **samples["capabilities"]))))
 validator.validate(dict(base, type="capabilities",
     payload=dict(sessionId=session, opus=True, **samples["capabilities"])))
 assert list(validator.iter_errors(dict(base, type="capabilities",
@@ -30,4 +32,4 @@ bad["payload"]["video"]["height"] = 720
 assert list(validator.iter_errors(bad))
 assert list(validator.iter_errors(dict(base, protocolVersion=1, type="ping", payload=dict(sessionId=session))))
 assert list(validator.iter_errors(dict(base, type="unknown", payload=dict(sessionId=session))))
-print("10 signaling messages, optional Opus capability and invalid version/resolution/type verified")
+print("10 signaling messages, optional Opus and gamepad capabilities and invalid version/resolution/type verified")

@@ -5,7 +5,8 @@
     { "name": "libdatachannel", "features": ["ws", "srtp"] },
     "nlohmann-json",
     "openssl",
-    "opus"
+    "opus",
+    "vigemclient"
   ],
   "overrides": [{ "name": "libdatachannel", "version": "0.24.5" }]
 }

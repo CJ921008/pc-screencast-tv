@@ -22,3 +22,7 @@ set_tests_properties(system-audio-codec-and-webrtc PROPERTIES TIMEOUT 30)
 add_executable(ipv6-checks IPv6Checks.cpp ../LANScreenCast/casting/LocalIPv6.cpp)
 target_link_libraries(ipv6-checks PRIVATE iphlpapi ws2_32)
 add_test(NAME local-ipv6-selection COMMAND ipv6-checks)
+
+add_executable(gamepad-checks GamepadChecks.cpp ../LANScreenCast/casting/RemoteGamepad.cpp)
+target_link_libraries(gamepad-checks PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME remote-gamepad-session COMMAND gamepad-checks)

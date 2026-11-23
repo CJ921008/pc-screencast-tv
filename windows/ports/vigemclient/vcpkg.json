@@ -1,0 +1,12 @@
+{
+  "name": "vigemclient",
+  "version": "1.21.222.0",
+  "description": "User-mode client for the separately installed ViGEmBus driver",
+  "homepage": "https://github.com/nefarius/ViGEmClient",
+  "license": "MIT",
+  "supports": "windows & !uwp & x64",
+  "dependencies": [
+    { "name": "vcpkg-cmake", "host": true },
+    { "name": "vcpkg-cmake-config", "host": true }
+  ]
+}

@@ -31,6 +31,7 @@ namespace winrt::LANScreenCast::implementation
         std::atomic_bool m_stop{ false };
         std::atomic_bool m_running{ false };
         std::shared_ptr<std::atomic_bool> m_controlPermission = std::make_shared<std::atomic_bool>(false);
+        std::shared_ptr<std::atomic_bool> m_gamepadPermission = std::make_shared<std::atomic_bool>(false);
         std::thread m_worker;
         winrt::hstring m_pairingCode;
         bool m_initialized = false;

@@ -93,6 +93,7 @@ std::wstring Wide(std::string_view message) {
 
 void ServeRemoteWebRtc(std::wstring const& ipv6, std::filesystem::path const& identityPath, bool resetPairing,
     VideoSettings settings, std::atomic_bool const& stop, std::shared_ptr<std::atomic_bool> controlPermission,
+    std::shared_ptr<std::atomic_bool> gamepadPermission,
     std::function<void(std::wstring const&)> const& onStatus,
     std::function<void(std::wstring const&)> const& onPairingCode) {
     WSADATA data{};
@@ -200,7 +201,7 @@ void ServeRemoteWebRtc(std::wstring const& ipv6, std::filesystem::path const& id
         }
         if (peer->isOpen()) {
             try {
-                StreamWebRtcSocket(peer, {}, ip, settings, stop, controlPermission, onStatus);
+                StreamWebRtcSocket(peer, {}, ip, settings, stop, controlPermission, gamepadPermission, onStatus);
             } catch (std::exception const& error) {
                 auto detail = Wide(error.what());
                 logging::FileLogger::Write(L"WARN", L"REMOTE", L"SESSION_ENDED", detail);

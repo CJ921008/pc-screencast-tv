@@ -7,6 +7,7 @@
 #include "AudioPipeline.h"
 #include "MediaClock.h"
 #include "RemoteInput.h"
+#include "RemoteGamepad.h"
 #include "SignalProtocol.h"
 #include "logging/FileLogger.h"
 #include <rtc/rtc.hpp>
@@ -49,6 +50,18 @@ static json Message(std::string const& type, std::string const& session, json pa
         {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count()}, {"payload",payload}};
 }
+static void ReplyGamepad(std::weak_ptr<rtc::DataChannel> const& destination,
+    std::optional<RemoteGamepad::Reply> const& reply) {
+    if (!reply) return;
+    if (auto channel = destination.lock(); channel && channel->isOpen()) {
+        try {
+            if (channel->bufferedAmount() > 8192) channel->close();
+            else channel->send(json{{"type","gamepad_status"},{"epoch",reply->epoch},{"state",reply->state}}.dump());
+        } catch (std::exception const&) {
+            channel->close();
+        }
+    }
+}
 struct Shared {
     std::mutex mutex;
     std::deque<std::string> signals;
@@ -76,6 +89,7 @@ struct FrameTimer {
 };
 void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bool const& stop,
     std::shared_ptr<std::atomic_bool> controlPermission,
+    std::shared_ptr<std::atomic_bool> gamepadPermission,
     std::function<void(std::wstring const&)> const& onStatus) {
     WSADATA sockets{};
     if(WSAStartup(MAKEWORD(2,2),&sockets)!=0)throw std::runtime_error("Winsock initialization failed");
@@ -84,12 +98,13 @@ void StreamWebRtc(std::wstring const& ip, VideoSettings settings, std::atomic_bo
     rtc::WebSocketConfiguration config; config.connectionTimeout = std::chrono::seconds(3);
     config.maxMessageSize = 1024 * 1024;
     auto ws = std::make_shared<rtc::WebSocket>(config);
-    StreamWebRtcSocket(ws, "ws://" + Utf8(ip) + ":47475/signaling", {}, settings, stop, controlPermission, onStatus);
+    StreamWebRtcSocket(ws, "ws://" + Utf8(ip) + ":47475/signaling", {}, settings, stop, controlPermission, gamepadPermission, onStatus);
 }
 
 void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string const& lanUrl,
     std::string const& bindIPv6, VideoSettings settings, std::atomic_bool const& stop,
     std::shared_ptr<std::atomic_bool> controlPermission,
+    std::shared_ptr<std::atomic_bool> gamepadPermission,
     std::function<void(std::wstring const&)> const& onStatus) {
     HRESULT apartment = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(apartment)) throw std::runtime_error("COM initialization failed");
@@ -106,7 +121,10 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
     std::shared_ptr<rtc::Track> track;
     std::shared_ptr<rtc::Track> audioTrack;
     std::shared_ptr<rtc::DataChannel> control;
+    std::shared_ptr<rtc::DataChannel> gameControl, gameAxes;
     auto input = std::make_shared<RemoteInput>(capture.Bounds(), controlPermission);
+    auto gamepad = std::make_shared<RemoteGamepad>(gamepadPermission, CreateXboxGamepad(),
+        [input](bool active) { input->SuspendForGamepad(active); });
     std::jthread controlWatchdog;
     bool separatePointer = false;
     auto lastView = Clock::time_point{};
@@ -121,8 +139,10 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
         std::shared_ptr<rtc::WebSocket> ws;
         std::shared_ptr<rtc::PeerConnection>& pc;
         std::shared_ptr<RemoteInput> input;
+        std::shared_ptr<RemoteGamepad> gamepad;
         std::string session;
         ~Cleanup() {
+            gamepad->Close();
             input->Close();
             state->done = true; state->ready.notify_all();
             if (producer.joinable()) producer.join();
@@ -131,7 +151,7 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
             if (pc) pc->close();
             ws->close();
         }
-    } cleanup{shared,producer,audioProducer,ws,pc,input,session};
+    } cleanup{shared,producer,audioProducer,ws,pc,input,gamepad,session};
     ws->onMessage([shared](rtc::message_variant message) {
         if (auto text = std::get_if<std::string>(&message)) {
             std::lock_guard lock(shared->mutex);
@@ -213,9 +233,10 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
                     config.portRangeEnd = RemoteMediaLastPort;
                 }
                 pc = std::make_shared<rtc::PeerConnection>(config);
-                pc->onStateChange([shared,input](rtc::PeerConnection::State state) {
+                pc->onStateChange([shared,input,gamepad](rtc::PeerConnection::State state) {
                     if (state == rtc::PeerConnection::State::Failed || state == rtc::PeerConnection::State::Disconnected) {
                         input->Close();
+                        gamepad->Close();
                         shared->fail("WebRTC 视频连接已断开");
                     }
                 });
@@ -275,10 +296,32 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
                     });
                     control->onClosed([input] { input->Close(); });
                     control->onError([input](std::string) { input->Close(); });
-                    controlWatchdog = std::jthread([input](std::stop_token stopToken) {
+                }
+                if (*gamepadPermission && payload.value("gamepad", false)) {
+                    gameControl = pc->createDataChannel("lsc-gamepad-v1");
+                    rtc::DataChannelInit latest;
+                    latest.reliability.unordered = true;
+                    latest.reliability.maxRetransmits = 0;
+                    gameAxes = pc->createDataChannel("lsc-gamepad-axes-v1", latest);
+                    auto bind = [gamepad, controlChannel = std::weak_ptr(gameControl)]
+                        (std::shared_ptr<rtc::DataChannel> const& channel, bool reliable) {
+                        channel->onMessage([gamepad, controlChannel, reliable](rtc::message_variant message) {
+                            if (auto text = std::get_if<std::string>(&message))
+                                ReplyGamepad(controlChannel, gamepad->Receive(*text, reliable, Clock::now()));
+                        });
+                        channel->onClosed([gamepad] { gamepad->Close(); });
+                        channel->onError([gamepad](std::string) { gamepad->Close(); });
+                    };
+                    bind(gameControl, true);
+                    bind(gameAxes, false);
+                }
+                if (control || gameControl) {
+                    controlWatchdog = std::jthread([input, gamepad, channel = std::weak_ptr(gameControl)](std::stop_token stopToken) {
                         while (!stopToken.stop_requested()) {
-                            input->Expire(Clock::now());
-                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                            auto now = Clock::now();
+                            input->Expire(now);
+                            ReplyGamepad(channel, gamepad->Expire(now));
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
                         }
                     });
                 }
@@ -326,6 +369,13 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
             input->Close();
             control->close();
             control.reset();
+        }
+        if (gameControl && !*gamepadPermission) {
+            gamepad->Close();
+            gameControl->close();
+            gameAxes->close();
+            gameControl.reset();
+            gameAxes.reset();
         }
         if (started && control && control->isOpen() && control->bufferedAmount() == 0 &&
             now - lastView >= std::chrono::milliseconds(33)) {
