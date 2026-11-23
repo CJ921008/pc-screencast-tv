@@ -37,7 +37,12 @@ internal class WebRtcReceiver(
     private var remoteClient: RemoteConnection? = null
     @Volatile private var control: DataChannel? = null
     @Volatile private var controlForeground = false
-    private val gamepadLink = GamepadLink(worker, ::dispatch, onGamepadState)
+    private val gamepadLink = GamepadLink(worker, ::dispatch) { status ->
+        if (controlForeground && status.mode == GamepadMode.DESKTOP) {
+            control?.let { writeControl(it, "{\"type\":\"resume\"}") }
+        }
+        onGamepadState(status)
+    }
     private var session = ""
     private val state = SignalState()
     private var lastAlive = 0L
