@@ -1,6 +1,7 @@
 package com.lanscreencast.tv
 
 import android.hardware.input.InputManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -107,8 +108,13 @@ internal class ControllerInput(
         }
     }
 
-    private fun isController(device: InputDevice) = !device.isVirtual &&
-        (device.supportsSource(InputDevice.SOURCE_GAMEPAD) || device.supportsSource(InputDevice.SOURCE_JOYSTICK))
+    private fun isController(device: InputDevice): Boolean {
+        if (device.isVirtual) return false
+        if (device.supportsSource(InputDevice.SOURCE_GAMEPAD)) return true
+        // Some phones expose an internal joystick source for built-in input features.
+        return device.supportsSource(InputDevice.SOURCE_JOYSTICK) &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || device.isExternal)
+    }
 
     fun key(event: KeyEvent): Boolean {
         if (target == Target.NONE || event.deviceId != device?.id) return false
