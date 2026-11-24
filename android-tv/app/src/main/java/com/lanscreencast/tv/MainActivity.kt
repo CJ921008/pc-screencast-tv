@@ -5,9 +5,11 @@ import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.hardware.input.InputManager
 import android.media.AudioManager
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -29,6 +31,9 @@ class MainActivity : ComponentActivity() {
     private var casting by mutableStateOf(false)
     private var rtcCasting by mutableStateOf(false)
     private var control by mutableStateOf<ControlView?>(null)
+    private var menuOpen by mutableStateOf(false)
+    private var foreground = false
+    private lateinit var hardware: RemoteHardwareInput
     private var direct by mutableStateOf(false)
     private var dragging by mutableStateOf(false)
     private var remoteActive by mutableStateOf(false)
@@ -65,11 +70,16 @@ class MainActivity : ComponentActivity() {
             } },
             onStatus = { value, active -> runOnUiThread {
                 status = value; rtcCasting = active
-                if (!active) requestDialog?.dismiss()
+                if (!active) {
+                    requestDialog?.dismiss()
+                    menuOpen = false
+                    hardware.release()
+                }
                 showFullscreen(rtcCasting || casting)
             } },
             onControl = { value -> runOnUiThread {
                 control = value
+                if (value?.hardwareInput != true) hardware.release()
                 if (value == null) {
                     direct = false
                     dragging = false
@@ -82,6 +92,10 @@ class MainActivity : ComponentActivity() {
             } },
             onAudioState = { value -> runOnUiThread { audioState = value } },
         )
+        hardware = RemoteHardwareInput(getSystemService(InputManager::class.java), rtcReceiver::sendControl) {
+            foreground && hasWindowFocus() && rtcCasting && control?.hardwareInput == true && !menuOpen
+        }
+        hardware.register()
         rtcReceiver.start()
         receiver = ScreenReceiver(
             this,
@@ -101,6 +115,12 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = remoteActive) { rtcReceiver.disconnectRemote() }
                 if (rtcCasting) {
                     ControlledVideo(rtcReceiver, status == "正在建立视频连接", control, direct, dragging,
+                        hardware = hardware,
+                        menuOpen = menuOpen,
+                        onMenuChange = { open ->
+                            menuOpen = open
+                            if (open) hardware.release()
+                        },
                         onMode = { dragging = false; direct = !direct },
                         onDrag = { dragging = it },
                         onText = {
@@ -183,7 +203,16 @@ class MainActivity : ComponentActivity() {
         else insets.show(WindowInsetsCompat.Type.systemBars())
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        (::hardware.isInitialized && hardware.key(event)) || super.dispatchKeyEvent(event)
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus && ::hardware.isInitialized) hardware.release()
+    }
+
     override fun onDestroy() {
+        hardware.close()
         receiver.stop()
         requestDialog?.dismiss()
         keyboardDialog?.dismiss()
@@ -195,11 +224,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        foreground = true
         rtcReceiver.setControlForeground(true)
         rtcReceiver.setAudioForeground(true)
     }
 
     override fun onPause() {
+        foreground = false
+        hardware.release()
         rtcReceiver.setControlForeground(false)
         rtcReceiver.setAudioForeground(false)
         dragging = false

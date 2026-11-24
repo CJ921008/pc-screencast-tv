@@ -51,6 +51,37 @@ bool ExtendedKey(int code) {
         code == VK_DELETE || code == VK_LWIN;
 }
 
+bool SupportedScanCode(int scan) {
+    if ((scan >= 0x01 && scan <= 0x53) || (scan >= 0x56 && scan <= 0x58)) return true;
+    switch (scan) {
+    case 0x11c: case 0x11d: case 0x135: case 0x137: case 0x138:
+    case 0x147: case 0x148: case 0x149: case 0x14b: case 0x14d:
+    case 0x14f: case 0x150: case 0x151: case 0x152: case 0x153:
+    case 0x15b: case 0x15c: case 0x15d:
+        return true;
+    default:
+        return false;
+    }
+}
+
+INPUT ScanKey(int scan, bool down) {
+    DWORD flags = KEYEVENTF_SCANCODE;
+    if (scan & 0x100) flags |= KEYEVENTF_EXTENDEDKEY;
+    if (!down) flags |= KEYEVENTF_KEYUP;
+    return Key(0, flags, static_cast<WORD>(scan & 0xff));
+}
+
+struct MouseButton {
+    std::string_view name;
+    int virtualKey;
+    DWORD down, up;
+};
+constexpr std::array mouseButtons{
+    MouseButton{"left", VK_LBUTTON, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP},
+    MouseButton{"right", VK_RBUTTON, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP},
+    MouseButton{"middle", VK_MBUTTON, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP},
+};
+
 LONG AbsoluteCoordinate(LONG point, int origin, int extent) {
     // Use the center of the target pixel within the virtual desktop's 16-bit range.
     return static_cast<LONG>(std::clamp(((2LL * (point - origin) + 1) * 32768) / extent, 0LL, 65535LL));
@@ -104,6 +135,24 @@ void RemoteInput::SendKeys(std::span<INPUT> events) {
 }
 
 void RemoteInput::ReleaseLocked() {
+    ReleaseHardwareLocked();
+    ReleaseTouchLocked();
+}
+
+void RemoteInput::ReleaseHardwareLocked() {
+    for (size_t scan = 0; scan < heldKeys.size(); ++scan) {
+        if (!heldKeys[scan]) continue;
+        auto release = ScanKey(static_cast<int>(scan), false);
+        if (Send(std::span(&release, 1))) heldKeys[scan] = false;
+    }
+    for (size_t index = 0; index < mouseButtons.size(); ++index) {
+        if (!heldButtons[index]) continue;
+        auto release = Mouse(mouseButtons[index].up);
+        if (Send(std::span(&release, 1))) heldButtons[index] = false;
+    }
+}
+
+void RemoteInput::ReleaseTouchLocked() {
     if (dragging) {
         auto release = Mouse(MOUSEEVENTF_LEFTUP);
         if (Send(std::span(&release, 1))) dragging = false;
@@ -140,6 +189,10 @@ void RemoteInput::Receive(std::string_view raw) {
             ReleaseLocked();
             return;
         }
+        if (type == "hardware_reset") {
+            ReleaseHardwareLocked();
+            return;
+        }
         if (now >= expires) {
             ReleaseLocked();
             return;
@@ -157,7 +210,7 @@ void RemoteInput::Receive(std::string_view raw) {
             Send(std::span(&event, 1));
         } else if (type == "drag") {
             if (message.at("down").get<bool>()) {
-                if (!dragging && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+                if (!dragging && !heldButtons[0] && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
                     std::array<INPUT, 2> events{};
                     size_t count = 0;
                     if (message.contains("x") || message.contains("y")) events[count++] = ReadPoint(message, desktop);
@@ -165,13 +218,14 @@ void RemoteInput::Receive(std::string_view raw) {
                     dragging = Send(std::span(events).first(count));
                 }
             } else {
-                ReleaseLocked();
+                ReleaseTouchLocked();
             }
         } else if (type == "click") {
             auto const& button = message.at("button").get_ref<std::string const&>();
             if (button != "left" && button != "right") return;
             bool right = button == "right";
-            if (dragging || (GetAsyncKeyState(right ? VK_RBUTTON : VK_LBUTTON) & 0x8000)) return;
+            if (dragging || heldButtons[right ? 1 : 0] ||
+                (GetAsyncKeyState(right ? VK_RBUTTON : VK_LBUTTON) & 0x8000)) return;
             std::array<INPUT, 3> events{};
             size_t count = 0;
             if (message.contains("x") || message.contains("y")) events[count++] = ReadPoint(message, desktop);
@@ -180,10 +234,41 @@ void RemoteInput::Receive(std::string_view raw) {
             auto sent = inject(std::span(events).first(count));
             blocked = sent != count;
             if (sent == count - 1) inject(std::span(&events[count - 1], 1));
+        } else if (type == "mouse_button") {
+            auto const& name = message.at("button").get_ref<std::string const&>();
+            auto button = std::find_if(mouseButtons.begin(), mouseButtons.end(),
+                [&](auto const& value) { return value.name == name; });
+            if (button == mouseButtons.end()) return;
+            auto index = static_cast<size_t>(button - mouseButtons.begin());
+            bool down = message.at("down").get<bool>();
+            if (heldButtons[index] == down) return;
+            if (down && ((index == 0 && dragging) || (GetAsyncKeyState(button->virtualKey) & 0x8000))) return;
+            std::array<INPUT, 2> events{};
+            size_t count = 0;
+            if (message.contains("x") || message.contains("y")) events[count++] = ReadPoint(message, desktop);
+            events[count++] = Mouse(down ? button->down : button->up);
+            if (Send(std::span(events).first(count))) heldButtons[index] = down;
+            else if (!down && Send(std::span(&events[count - 1], 1))) heldButtons[index] = false;
         } else if (type == "wheel") {
             auto amount = BoundedInt(message, "delta", -960, 960);
-            auto event = Mouse(MOUSEEVENTF_WHEEL, 0, 0, static_cast<DWORD>(amount));
-            Send(std::span(&event, 1));
+            auto flags = message.value("horizontal", false) ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL;
+            std::array<INPUT, 2> events{};
+            size_t count = 0;
+            if (message.contains("x") || message.contains("y")) events[count++] = ReadPoint(message, desktop);
+            events[count++] = Mouse(flags, 0, 0, static_cast<DWORD>(amount));
+            Send(std::span(events).first(count));
+        } else if (type == "key_state") {
+            auto scan = BoundedInt(message, "scanCode", 1, static_cast<int>(heldKeys.size() - 1));
+            if (!SupportedScanCode(scan)) return;
+            bool down = message.at("down").get<bool>();
+            bool repeat = message.value("repeat", false);
+            if (repeat ? (!down || !heldKeys[scan]) : (heldKeys[scan] == down)) return;
+            if (down && !repeat) {
+                auto vk = MapVirtualKeyW((scan & 0x100) ? (0xe000 | (scan & 0xff)) : scan, MAPVK_VSC_TO_VK_EX);
+                if (vk && (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000)) return;
+            }
+            auto event = ScanKey(scan, down);
+            if (Send(std::span(&event, 1))) heldKeys[scan] = down;
         } else if (type == "key") {
             int code = BoundedInt(message, "code", 1, 254);
             int modifiers = BoundedInt(message, "modifiers", 0, 15);

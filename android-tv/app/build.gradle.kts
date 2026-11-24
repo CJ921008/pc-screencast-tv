@@ -11,8 +11,8 @@ android {
         applicationId = "com.lanscreencast.tv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.6.1"
+        versionCode = 11
+        versionName = "0.7.1"
     }
 
     buildTypes {

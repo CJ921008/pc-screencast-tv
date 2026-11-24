@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -24,6 +25,8 @@ public:
 
 private:
     void ReleaseLocked();
+    void ReleaseHardwareLocked();
+    void ReleaseTouchLocked();
     bool Send(std::span<INPUT> events);
     void SendKeys(std::span<INPUT> events);
 
@@ -34,6 +37,8 @@ private:
     Clock::time_point expires{};
     bool closed = false;
     bool dragging = false;
+    std::array<bool, 512> heldKeys{};
+    std::array<bool, 3> heldButtons{};
     std::atomic_bool blocked{false};
 };
 }

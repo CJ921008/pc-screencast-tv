@@ -1,7 +1,6 @@
 package com.lanscreencast.tv
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.MediaCodecList
 import com.lanscreencast.tv.logging.FileLogger
 import org.java_websocket.WebSocket
@@ -37,7 +36,6 @@ internal class WebRtcReceiver(
     private var remoteClient: RemoteConnection? = null
     @Volatile private var control: DataChannel? = null
     @Volatile private var controlForeground = false
-    private val hasTouchscreen = context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
     private var session = ""
     private val state = SignalState()
     private var lastAlive = 0L
@@ -306,7 +304,7 @@ internal class WebRtcReceiver(
         acceptedAt = System.currentTimeMillis()
         deadline = acceptedAt + if (conn === remoteClient) 11000 else 10000
         val capabilities = JSONObject().put("h264", decoderFactory.supportedCodecs.isNotEmpty())
-            .put("supports1080p30", supports1080).put("remoteInput", hasTouchscreen)
+            .put("supports1080p30", supports1080).put("remoteInput", true)
         if (supportsOpus) capabilities.put("opus", true)
         send(conn, "capabilities", capabilities)
         onStatus("正在建立视频连接", true)
@@ -331,7 +329,7 @@ internal class WebRtcReceiver(
             override fun onAddStream(value: MediaStream) {}
             override fun onRemoveStream(value: MediaStream) {}
             override fun onDataChannel(value: DataChannel) { dispatch {
-                if (epoch == generation && hasTouchscreen && control == null && value.label() == "lsc-input-v1") {
+                if (epoch == generation && control == null && value.label() == "lsc-input-v1") {
                     attachControl(value)
                 } else {
                     value.dispose()

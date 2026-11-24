@@ -21,3 +21,13 @@ stats reports actual rendered fps, received bitrate (bits/second), RTT (millisec
 Android opens `wss://[WINDOWS_IPV6]:47476/remote`. The pairing code is `LSC1.<certificate SHA-256>.<random token>` using unpadded base64url for the two 32-byte fields. Android validates the exact certificate pin during TLS before sending a text JSON message with `type: "remote_auth"`, `version: 1` and `token`. On acceptance, Windows sends the existing v2 `hello` and both endpoints reuse v2 signaling on that socket. On rejection, Windows may send a `remote_error` object with `version: 1` and a `code` such as `PAIRING_REQUIRED` or `BUSY` before closing. Only one authenticated session is active at a time.
 
 Windows binds the public IPv6 entered by the user, including for the host ICE candidates in UDP 47500–47509. Data channel control requires a separate permission on Windows. The access token and certificate private key are protected using Windows DPAPI. Resetting pairing rotates the certificate and the token.
+
+
+## Physical keyboards and mice
+
+A sender supporting hardware input adds `hardwareInput: true` to its `view` message on the authorized `lsc-input-v1` data channel. Receivers use it to enable hardware-event forwarding. Legacy receivers keep using their existing touch and text commands. All inputs use the same channel and foreground lease, including over the authenticated public IPv6 connection.
+
+- `key_state` has an integer `scanCode` (PC set 1 make code, with bit 8 representing the E0 prefix), a boolean `down`, and an optional boolean `repeat`. A repeat applies only to an already held key.
+- `mouse_button` has a `button` of `left`, `right`, or `middle`, a boolean `down`, and optional `x` and `y` in the existing 0–10000 content coordinates.
+- `wheel` accepts optional coordinates and an optional `horizontal` boolean. `delta` is in Windows wheel units.
+- `hardware_reset` releases held physical keyboard and mouse input when the receiver loses focus, opens its local control menu, or disconnects an active input device. Pause, lease expiry, permission revocation, and channel close release all tracked input.

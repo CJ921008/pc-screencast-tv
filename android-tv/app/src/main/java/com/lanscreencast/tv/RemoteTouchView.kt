@@ -16,6 +16,7 @@ internal data class ControlView(
     val cursorX: Float?,
     val cursorY: Float?,
     val blocked: Boolean,
+    val hardwareInput: Boolean = false,
 ) {
     companion object {
         fun parse(message: String): ControlView? = runCatching {
@@ -30,7 +31,7 @@ internal data class ControlView(
             val cursor = json.optJSONArray("cursor")
             fun coordinate(index: Int) = cursor?.getInt(index)?.also { require(it in 0..10000) }?.div(10000f)
             ControlView(l / 10000f, t / 10000f, r / 10000f, b / 10000f,
-                coordinate(0), coordinate(1), json.getBoolean("blocked"))
+                coordinate(0), coordinate(1), json.getBoolean("blocked"), json.optBoolean("hardwareInput"))
         }.getOrNull()
     }
 }
@@ -38,6 +39,7 @@ internal data class ControlView(
 internal class RemoteTouchView(
     context: Context,
     private val send: (JSONObject, Boolean) -> Unit,
+    private val hardware: RemoteHardwareInput,
     private val onCancelDrag: () -> Unit,
 ) : View(context) {
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -79,7 +81,21 @@ internal class RemoteTouchView(
         }
     }
 
+    private fun remoteMouse(event: MotionEvent): Boolean {
+        if (!hardware.handlesMouse(event)) return false
+        if ((event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS) &&
+            (fingers != 0 || dragEnabled || directDrag)
+        ) cancelGesture()
+        return hardware.mouse(event) { clamp -> position(event.x, event.y, clamp) }
+    }
+
+    override fun onHoverEvent(event: MotionEvent): Boolean = remoteMouse(event) || super.onHoverEvent(event)
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean =
+        remoteMouse(event) || super.onGenericMotionEvent(event)
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (remoteMouse(event)) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent.requestDisallowInterceptTouchEvent(true)
@@ -224,12 +240,16 @@ internal class RemoteTouchView(
     }
 
     override fun onDetachedFromWindow() {
+        hardware.release()
         cancelGesture()
         super.onDetachedFromWindow()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (oldw > 0 && oldh > 0) cancelGesture()
+        if (oldw > 0 && oldh > 0) {
+            hardware.release()
+            cancelGesture()
+        }
     }
 }

@@ -177,6 +177,73 @@ static void checkRemoteInput() {
     input.Close();
     require(injected.size() == 6, "Closing twice produced an extra mouse release");
 }
+static void checkHardwareInput() {
+    auto allowed = std::make_shared<std::atomic_bool>(true);
+    std::vector<INPUT> injected;
+    RemoteInput input({0,0,1920,1080}, allowed, [&](std::span<INPUT> events) {
+        injected.insert(injected.end(), events.begin(), events.end());
+        return static_cast<UINT>(events.size());
+    });
+    auto resume = [&] { input.Receive(R"({"type":"resume"})"); };
+    auto pressW = [&] { input.Receive(R"({"type":"key_state","scanCode":17,"down":true})"); };
+    auto releaseW = [&] { input.Receive(R"({"type":"key_state","scanCode":17,"down":false})"); };
+    auto pressControl = [&] { input.Receive(R"({"type":"key_state","scanCode":285,"down":true})"); };
+    auto pressRight = [&] { input.Receive(R"({"type":"mouse_button","button":"right","down":true,"x":3000,"y":4200})"); };
+    auto releaseRight = [&] { input.Receive(R"({"type":"mouse_button","button":"right","down":false,"x":4000,"y":5000})"); };
+    auto isScan = [](INPUT const& event, WORD scan, DWORD flags) {
+        return event.type == INPUT_KEYBOARD && event.ki.wVk == 0 && event.ki.wScan == scan &&
+            event.ki.dwFlags == (KEYEVENTF_SCANCODE | flags);
+    };
+    pressW();
+    pressRight();
+    require(injected.empty(), "Hardware input accepted without foreground lease");
+    resume();
+    input.Receive(R"({"type":"key_state","scanCode":511,"down":true})");
+    input.Receive(R"({"type":"key_state","scanCode":17,"down":true,"repeat":true})");
+    releaseW();
+    require(injected.empty(), "Unknown or unheld key reached SendInput");
+
+    pressControl();
+    pressW();
+    pressW();
+    input.Receive(R"({"type":"key_state","scanCode":17,"down":true,"repeat":true})");
+    releaseW();
+    require(injected.size() == 4 && isScan(injected[0], 0x1d, KEYEVENTF_EXTENDEDKEY) &&
+        isScan(injected[1], 0x11, 0) && isScan(injected[2], 0x11, 0) &&
+        isScan(injected[3], 0x11, KEYEVENTF_KEYUP), "Modifier, hold, repeat or release scan code is wrong");
+    pressRight();
+    releaseRight();
+    require(injected.size() == 8 && (injected[4].mi.dwFlags & MOUSEEVENTF_ABSOLUTE) &&
+        injected[5].mi.dwFlags == MOUSEEVENTF_RIGHTDOWN && (injected[6].mi.dwFlags & MOUSEEVENTF_ABSOLUTE) &&
+        injected[7].mi.dwFlags == MOUSEEVENTF_RIGHTUP, "Mouse events did not position before button transitions");
+    input.Receive(R"({"type":"wheel","horizontal":true,"delta":-120,"x":4000,"y":5000})");
+    require(injected.size() == 10 && (injected[8].mi.dwFlags & MOUSEEVENTF_ABSOLUTE) &&
+        injected[9].mi.dwFlags == MOUSEEVENTF_HWHEEL && injected[9].mi.mouseData == static_cast<DWORD>(-120),
+        "Scroll did not inject the requested coordinate and axis");
+    input.Receive(R"({"type":"hardware_reset"})");
+    require(injected.size() == 11 && isScan(injected.back(), 0x1d, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP),
+        "Reset did not release the remaining hardware key");
+
+    injected.clear();
+    pressW();
+    pressRight();
+    *allowed = false;
+    input.Expire(RemoteInput::Clock::now());
+    require(injected.size() == 5 && isScan(injected[3], 0x11, KEYEVENTF_KEYUP) &&
+        injected[4].mi.dwFlags == MOUSEEVENTF_RIGHTUP, "Permission loss left hardware input pressed");
+    *allowed = true;
+    resume();
+    injected.clear();
+    pressControl();
+    pressRight();
+    input.Receive(R"({"type":"pause"})");
+    require(injected.size() == 5 && isScan(injected[3], 0x1d, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP) &&
+        injected[4].mi.dwFlags == MOUSEEVENTF_RIGHTUP, "Backgrounding left hardware input pressed");
+    resume();
+    pressW();
+    input.Close();
+    require(isScan(injected.back(), 0x11, KEYEVENTF_KEYUP), "Disconnect left hardware input pressed");
+}
 static void checkRemoteTls() {
     WSADATA data{};
     require(WSAStartup(MAKEWORD(2, 2), &data) == 0, "Cannot initialize sockets");
@@ -268,6 +335,7 @@ static void checkRemoteTls() {
 int main() {
     try {
         checkRemoteInput();
+        checkHardwareInput();
         checkRemoteTls();
         std::string session="14a92ef7-721c-4670-b65e-cb6791be36dd";
         nlohmann::json signal={{"protocolVersion",2},{"type","ping"},{"requestId",session},{"timestamp",0},{"payload",{{"sessionId",session}}}};

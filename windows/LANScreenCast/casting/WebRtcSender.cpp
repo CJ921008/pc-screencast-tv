@@ -342,7 +342,8 @@ void StreamWebRtcSocket(std::shared_ptr<rtc::WebSocket> const& ws, std::string c
             }
             auto view = json{{"type","view"},{"rect",{content.left * 10000 / settings.width,
                 content.top * 10000 / settings.height, content.right * 10000 / settings.width,
-                content.bottom * 10000 / settings.height}}, {"cursor",cursor}, {"blocked",input->InputBlocked()}}.dump();
+                content.bottom * 10000 / settings.height}}, {"cursor",cursor},
+                {"blocked",input->InputBlocked()}, {"hardwareInput",true}}.dump();
             if (view != previousView) {
                 try { control->send(view); }
                 catch (std::exception const&) { input->Close(); control->close(); }

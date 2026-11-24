@@ -25,10 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -53,6 +50,9 @@ internal fun ControlledVideo(
     control: ControlView?,
     direct: Boolean,
     dragging: Boolean,
+    hardware: RemoteHardwareInput,
+    menuOpen: Boolean,
+    onMenuChange: (Boolean) -> Unit,
     onMode: () -> Unit,
     onDrag: (Boolean) -> Unit,
     onText: () -> Unit,
@@ -61,7 +61,6 @@ internal fun ControlledVideo(
     audioState: AudioPlaybackState?,
     onAudioToggle: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val tv = remember(context) { context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
     val openFocus = remember { FocusRequester() }
@@ -70,10 +69,10 @@ internal fun ControlledVideo(
     val showMenu = hasActions && menuOpen
 
     LaunchedEffect(hasActions, showMenu) {
-        if (!hasActions) menuOpen = false
+        if (!hasActions) onMenuChange(false)
         else if (tv) (if (showMenu) closeFocus else openFocus).requestFocus()
     }
-    BackHandler(enabled = showMenu) { menuOpen = false }
+    BackHandler(enabled = showMenu) { onMenuChange(false) }
 
     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         // The encoded frame is always 16:9. Keep touch, cursor and video in the same rectangle.
@@ -85,7 +84,7 @@ internal fun ControlledVideo(
             )
             if (control != null) {
                 AndroidView(
-                    factory = { RemoteTouchView(it, receiver::sendControl) { onDrag(false) } },
+                    factory = { RemoteTouchView(it, receiver::sendControl, hardware) { onDrag(false) } },
                     update = { it.update(control, direct, dragging) },
                     modifier = Modifier.matchParentSize(),
                 )
@@ -98,7 +97,7 @@ internal fun ControlledVideo(
         if (hasActions) {
             if (showMenu) {
                 Box(Modifier.matchParentSize().background(Color(0x4407100D))
-                    .pointerInput(Unit) { detectTapGestures { menuOpen = false } })
+                    .pointerInput(Unit) { detectTapGestures { onMenuChange(false) } })
             }
 
             Box(
@@ -118,7 +117,7 @@ internal fun ControlledVideo(
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically) {
                             Text("投屏控制", color = CastText, style = MaterialTheme.typography.titleMedium)
-                            MenuIcon("×", "收起投屏控制", Modifier.focusRequester(closeFocus)) { menuOpen = false }
+                            MenuIcon("×", "收起投屏控制", Modifier.focusRequester(closeFocus)) { onMenuChange(false) }
                         }
                         if (control != null) {
                             Text(
@@ -130,13 +129,15 @@ internal fun ControlledVideo(
                                 color = if (control.blocked) CastWarning else CastMuted,
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (control.hardwareInput) Text("外接键盘和鼠标可直接控制 Windows",
+                                color = CastMuted, style = MaterialTheme.typography.bodySmall)
                             CastAction(if (direct) "当前为直接触摸" else "当前为触控板", onMode, Modifier.fillMaxWidth())
                             CastAction(if (dragging) "松开" else "拖拽", {
                                 onDrag(!dragging)
-                                menuOpen = false
+                                onMenuChange(false)
                             }, Modifier.fillMaxWidth())
-                            CastAction("输入文字", { menuOpen = false; onText() }, Modifier.fillMaxWidth())
-                            CastAction("快捷键", { menuOpen = false; onShortcuts() }, Modifier.fillMaxWidth())
+                            CastAction("输入文字", { onMenuChange(false); onText() }, Modifier.fillMaxWidth())
+                            CastAction("快捷键", { onMenuChange(false); onShortcuts() }, Modifier.fillMaxWidth())
                         }
                         audioState?.let {
                             val label = when {
@@ -149,7 +150,7 @@ internal fun ControlledVideo(
                         onDisconnect?.let { CastAction("断开远程连接", it, Modifier.fillMaxWidth()) }
                     }
                 } else {
-                    MenuIcon("⋯", "显示投屏控制", Modifier.focusRequester(openFocus)) { menuOpen = true }
+                    MenuIcon("⋯", "显示投屏控制", Modifier.focusRequester(openFocus)) { onMenuChange(true) }
                 }
             }
         }
