@@ -14,8 +14,10 @@
                 <Setter Property="Padding" Value="22" />
             </Style>
         </Grid.Resources>
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Padding="24" Spacing="20" MaxWidth="1120">
+        <ScrollViewer MaxWidth="1120" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel Padding="24" Spacing="20">
                 <StackPanel Spacing="6">
                     <TextBlock x:Name="AppVersion" Foreground="{StaticResource MintBrush}" FontWeight="SemiBold" />
                     <TextBlock Text="桌面投屏" FontSize="36" FontWeight="SemiBold" />
